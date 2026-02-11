@@ -1,4 +1,11 @@
 # lob.py
+
+![Tests](https://github.com/mattermat/lob.py/actions/workflows/tests.yml/badge.svg)
+![Coverage](https://codecov.io/gh/mattermat/lob.py/branch/main/graph/badge.svg)
+![Python](https://img.shields.io/badge/python-3.8%2B-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+![PyPI](https://img.shields.io/pypi/v/lobpy)
+
 Limit Order Book in python
 
 - LOB is the basic limit order book.
