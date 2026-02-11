@@ -62,6 +62,10 @@ We just need one dep: sortedcontainers. Consider to implement it.
 - `midprice`: mid-price
 - `vw_midprice`: volume-weighted mid-price
 #### Other methods
+- `check()`: Check consistency of the order book
+  - Returns `True` if the book is consistent (best bid < best ask or one side is empty)
+  - Returns `False` if the book is crossed (best bid >= best ask)
+  - Useful for validating order book state before processing or after updates
 - `get_slippage(volume, side=['midprice', 'ask', 'bid'])`: calculate the slippage from the top level (from the midprice is not declared)
 
 #### Export Methods
