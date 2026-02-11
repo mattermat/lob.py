@@ -16,7 +16,7 @@ Limit Order Book in python
     - spread
     - limit order book
 
-- tsLOB: time series of LOB
+- LOBts: time series of LOB
   - it has the same basic methods of LOB
   - at any group of updates (pushed via set_updates), it produce another LOB in the inner data structure
   - LOB(t) are indexed by timestamp
@@ -27,3 +27,29 @@ Limit Order Book in python
     - cancel frequency
 
 We just need one dep: sortedcontainers. Consider to implement it.
+
+
+### LOB API
+#### Methods
+- `set_snapshot`
+- `update`
+- `set_update`
+#### Properties
+- `bid`: best bid price
+- `ask`: best ask price
+- `vi`: volume imbalance
+- `bidq`: best bid size
+- `askq`: best ask size
+- `bid[0]`: bid at level 0 - equals to `bid`
+- `bid[i]`: bid at level i
+- `ask[0]`: ask at level 0 - equals to `ask`
+- `ask[i]`: ask at level i
+- `vi[0]`: volume imbalance of the first level - equals to `vi`
+- `vi[i]`: volume imbalance of the top i levels
+- `spread`: spread in absolute value
+- `spread_tick`: spread in ticks
+- `spread_rel`: spread in percentage of the bid level
+- `midprice`: mid-price
+- `vw_midprice`: volume-weighted mid-price
+#### Other methods
+- `get_slippage(volume, side=['midprice', 'ask', 'bid'])`: calculate the slippage from the top level (from the midprice is not declared)
