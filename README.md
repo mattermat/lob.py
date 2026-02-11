@@ -2,11 +2,14 @@
 
 ![Tests](https://github.com/mattermat/lob.py/actions/workflows/tests.yml/badge.svg)
 ![Coverage](https://codecov.io/gh/mattermat/lob.py/branch/main/graph/badge.svg)
+![Code Quality](https://github.com/mattermat/lob.py/actions/workflows/code-quality.yml/badge.svg)
 ![Python](https://img.shields.io/badge/python-3.8%2B-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
+![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![PyPI](https://img.shields.io/pypi/v/lobpy)
 
-Limit Order Book in python
+Limit Order Book in Python
+
+[![Contributing](https://img.shields.io/badge/CONTRIBUTING-Wiki-brightgreen)](CONTRIBUTING.md)
 
 - LOB is the basic limit order book.
 - LOB has the following methods:
@@ -60,3 +63,36 @@ We just need one dep: sortedcontainers. Consider to implement it.
 - `vw_midprice`: volume-weighted mid-price
 #### Other methods
 - `get_slippage(volume, side=['midprice', 'ask', 'bid'])`: calculate the slippage from the top level (from the midprice is not declared)
+
+#### Export Methods
+##### Numpy and Pandas Export
+- `to_np(side=None, nlevels=None)`: Export order book to numpy array
+  - `side`: `'b'` for bids, `'a'` for asks, or `None` for both sides
+  - `nlevels`: number of top levels to export (default: all levels)
+  - Returns 2D array with shape `(n, 2)` [price, size] when side specified
+  - Returns 2D array with shape `(n, 3)` [side, price, size] when side=None
+  - When both sides, bids come first (best to worst), then asks (best to worst)
+
+- `to_pd(side=None, nlevels=None)`: Export order book to pandas DataFrame
+  - `side`: `'b'` for bids, `'a'` for asks, or `None` for both sides
+  - `nlevels`: number of top levels to export (default: all levels)
+  - Returns DataFrame with columns `['price', 'size']` when side specified
+  - Returns DataFrame with columns `['price', 'size', 'side']` when side=None
+  - Side column contains `'b'` for bids and `'a'` for asks
+
+##### File Export
+- `to_csv(path, side=None, nlevels=None)`: Export order book to CSV file
+  - `path`: file path for CSV output
+  - `side`, `nlevels`: same as to_np/to_pd
+  - Saves current snapshot with appropriate columns
+
+- `to_xlsx(path, side=None, nlevels=None)`: Export order book to XLSX file
+  - `path`: file path for XLSX output
+  - `side`, `nlevels`: same as to_np/to_pd
+  - Saves current snapshot with appropriate columns
+
+- `to_parquet(path, side=None, nlevels=None)`: Export order book to Parquet file
+  - `path`: file path for Parquet output
+  - `side`, `nlevels`: same as to_np/to_pd
+  - Saves current snapshot with appropriate columns
+  - Efficient binary format for large order books
