@@ -13,88 +13,73 @@ times = [
 ]
 
 # Create a time-series LOB
-lobts = LOBts(name="BTC-USD", tick_size=0.01, mode='history')
+lobts = LOBts(tick_size=0.01) # mode not specified, default is 'delta'
 
-# Set initial snapshot at timestamp 1000
 lobts.set_snapshot(
     bids=[(49900.00, 1.5), (49899.00, 2.3), (49898.50, 1.8)],
     asks=[(49901.00, 2.1), (49902.00, 1.7), (49903.00, 2.5)],
-    timestamp=1000
+    timestamp=times[0]
 )
 
-# Add updates at timestamp 1001
+# Set updates. It create another point in the timeseries
 lobts.set_updates([
-    ('bid', 49900.00, 2.0),  # Update size
-    ('bid', 49901.00, 1.0),  # New level (arrival)
-    ('ask', 49901.00, 0),    # Cancel level
-    ('ask', 49904.00, 1.5),  # New level
-], timestamp=1001)
+    ('b', 49900.00, 2.0),
+    ('b', 49901.00, 1.0),
+    ('a', 49901.00, 0),
+    ('a', 49904.00, 1.5),
+], timestamp=times[1])
+# providing an existing timestamp should throw an error, unless `force=True` is set
 
-# Another update at timestamp 1002
+# Set updates. It create another point in the timeseries
 lobts.set_updates([
-    ('bid', 49899.00, 0),    # Cancel
-    ('bid', 49897.00, 3.0),  # New
-], timestamp=1002)
+    ('b', 49899.00, 0),
+    ('b', 49897.00, 3.0),
+], timestamp=times[2])
 
 # Access LOB at specific timestamp
-print("=== LOB at timestamp 1000 ===")
-lob_1000 = lobts[1000]
-print(f"Best bid: {lob_1000.bid}")
-print(f"Best ask: {lob_1000.ask}")
-print(f"Spread: {lob_1000.spread}")
+print(f"LOB at timestamp {times[0]}:")
+print(lobts[times[0]].to_np())
+print(f"Bid: {lobts[times[0]].bid}")
+print(f"Ask: {lobts[times[0]].ask}")
+print(f"Spread: {lobts[times[0]].spread}")
 
-print("\n=== LOB at timestamp 1001 ===")
-lob_1001 = lobts[1001]
-print(f"Best bid: {lob_1001.bid}")
-print(f"Best ask: {lob_1001.ask}")
-print(f"Spread: {lob_1001.spread}")
+print(f"LOB at timestamp {times[1]}:")
+print(lobts[times[1]].to_np())
+print(f"Bid: {lobts[times[1]].bid}")
+print(f"Ask: {lobts[times[1]].ask}")
+print(f"Spread: {lobts[times[1]].spread}")
 
-print("\n=== Latest LOB ===")
-print(f"Best bid: {lobts.bid}")
-print(f"Best ask: {lobts.ask}")
-print(f"Spread: {lobts.spread}")
+# LOB lengths
+print({lobts.len}) # return the lenght in number of timestamps
+print({lobts.len_ts}) # last timestamp - first timestamp
 
 # Get time-series stats
 print("\n=== Time Series Statistics ===")
-spread_ts = lobts.spread_ts()
-print(f"Spread time series: {spread_ts}")
-
-midprice_ts = lobts.midprice_ts()
-print(f"Mid-price time series: {midprice_ts}")
+print(f"Spread time series: {lobts.spread}")
+print(f"Bid time series: {lobts.ask}")
+print(f"Ask time series: {lobts.bid}")
+print(f"Mid-price time series: {lobts.midprice}")
 
 # Arrival and cancel frequency (total)
 print("\n=== Event Frequencies ===")
-arrival_freq = lobts.arrival_frequency()
-print(f"Total arrivals: {arrival_freq}")
+print(f"Total arrivals: {lobts.arrival_frequency}")
+print(f"Total cancels: {lobts.cancel_frequency}")
 
-cancel_freq = lobts.cancel_frequency()
-print(f"Total cancels: {cancel_freq}")
+# Convert to pandas DataFrame
+print(lobts.to_pd())
 
-# Frequency per time window
-print("\n=== Window-based Frequencies ===")
-arrival_window = lobts.arrival_frequency(window=1)  # Per timestamp unit
-print(f"Arrivals per window: {arrival_window}")
+# Time windows slicing
+sliced_lobts = lobts[times[1]:times[2]]
+print(lobts.to_pd())
 
-# Export to pandas
-print("\n=== Export to Pandas ===")
-df = lobts.to_pd()
-print(df)
+# Get time-series stats
+print("\n=== Time Series Statistics ===")
+print(f"Spread time series: {sliced_lobts.spread}")
+print(f"Bid time series: {sliced_lobts.ask}")
+print(f"Ask time series: {sliced_lobts.bid}")
+print(f"Mid-price time series: {sliced_lobts.spread}")
 
-# Get a range of timestamps
-print("\n=== Time Range ===")
-lob_range = lobts.get_range(start_ts=1000, end_ts=1001)
-print(f"Timestamps in range: {list(lob_range._timestamps)}")
-
-# Update mode='latest' - keeps only latest state
-lobts_latest = LOBts(name="Latest Only", mode='latest')
-lobts_latest.set_snapshot(
-    bids=[(100, 10)],
-    asks=[(101, 8)],
-    timestamp=2000
-)
-lobts_latest.set_updates([('bid', 99, 5)], timestamp=2001)
-lobts_latest.set_updates([('bid', 102, 3)], timestamp=2002)
-
-print("\n=== Latest Mode ===")
-print(f"Number of stored snapshots: {len(lobts_latest)}")
-print(f"Best bid at latest: {lobts_latest.bid}")
+# Arrival and cancel frequency (total)
+print("\n=== Event Frequencies ===")
+print(f"Total arrivals: {sliced_lobts.arrival_frequency}")
+print(f"Total cancels: {sliced_lobts.cancel_frequency}")
