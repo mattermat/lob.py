@@ -62,4 +62,4 @@ jobs:
         pip install bandit
 
     - name: Run Bandit
-      run: bandit -r lobpy
+      run: bandit -r lobpy -c .bandit

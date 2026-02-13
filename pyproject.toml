@@ -89,7 +89,3 @@ ignore_errors = true
 [[tool.mypy.overrides]]
 module = "lobpy.sorteddict"
 ignore_errors = true
-
-[tool.bandit]
-exclude_dirs = ["tests"]
-skips = ["B101"]
