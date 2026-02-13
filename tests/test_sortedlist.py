@@ -1,8 +1,9 @@
 
 import random
-from sortedcontainers import SortedList
 from itertools import chain
+
 import pytest
+from sortedcontainers import SortedList
 
 
 def test_init():

@@ -1,6 +1,7 @@
 import random
-from sortedcontainers import SortedList, SortedKeyList
+
 import pytest
+from sortedcontainers import SortedKeyList, SortedList
 
 
 def modulo(val):

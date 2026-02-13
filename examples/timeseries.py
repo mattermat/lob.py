@@ -2,8 +2,8 @@
 Example showing LOBts (Time Series LOB) usage.
 """
 
+
 from lobpy import LOBts
-import time
 
 # array of timestamps in microseconds
 times = [

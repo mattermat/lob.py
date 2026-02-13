@@ -2,6 +2,7 @@ import time
 
 from .sorteddict import SortedDict
 
+
 def neg(x: int) -> int:
     return -x
 
@@ -58,15 +59,15 @@ class VolumeImbalanceAccessor:
     def __getitem__(self, index):
         bid_items = list(self._bids.items())
         ask_items = list(self._asks.items())
-        
+
         nlevels = index + 1
-        
+
         total_bid = sum(size for _, size in bid_items[:nlevels])
         total_ask = sum(size for _, size in ask_items[:nlevels])
-        
+
         if total_bid + total_ask == 0:
             return 0.0
-        
+
         return (total_bid - total_ask) / (total_bid + total_ask)
 
     def __eq__(self, other):
@@ -93,7 +94,7 @@ class LOB():
         self.tick_size = tick_size
         self.timestamp = int(time.time()*1000)
         self._crossing_detected = False
-        
+
         if bids is None:
             bids = []
         if asks is None:
@@ -134,7 +135,7 @@ class LOB():
         """
         save_bids = dict(self._bids)
         save_asks = dict(self._asks)
-        
+
         for side, price, size in updates:
             side = _normalize_side(side)
             if side == 'bid':
@@ -147,14 +148,14 @@ class LOB():
                     save_asks.pop(price, None)
                 else:
                     save_asks[price] = size
-        
+
         self._bids.clear()
         self._asks.clear()
         for price, qty in save_bids.items():
             self._bids[price] = qty
         for price, qty in save_asks.items():
             self._asks[price] = qty
-        
+
         if timestamp != 0:
             self.timestamp = timestamp
 
@@ -185,7 +186,7 @@ class LOB():
         except KeyError:
             pass # TODO: error message
         return
-    
+
     def _delete_bid_level(self, price_level, timestamp=0):
         if timestamp != 0:
             self.timestamp = timestamp
@@ -426,22 +427,22 @@ class LOB():
             else:
                 bid_levels = _get_levels(self._bids)
                 ask_levels = _get_levels(self._asks)
-                
+
                 bid_count = (nlevels + 1) // 2
                 ask_count = nlevels // 2
-                
+
                 bid_levels = bid_levels[:bid_count]
                 ask_levels = ask_levels[:ask_count]
-            
+
             if not bid_levels and not ask_levels:
                 return np.empty((0, 3), dtype=object)
-            
+
             data = []
             for price, size in bid_levels:
                 data.append(('b', price, size))
             for price, size in ask_levels:
                 data.append(('a', price, size))
-            
+
             return np.array(data, dtype=object)
 
     def to_pd(self, side=None, nlevels=None):
@@ -471,19 +472,19 @@ class LOB():
             else:
                 bid_levels = _get_levels(self._bids)
                 ask_levels = _get_levels(self._asks)
-                
+
                 bid_count = (nlevels + 1) // 2
                 ask_count = nlevels // 2
-                
+
                 bid_levels = bid_levels[:bid_count]
                 ask_levels = ask_levels[:ask_count]
-            
+
             data = []
             for price, size in bid_levels:
                 data.append((price, size, 'b'))
             for price, size in ask_levels:
                 data.append((price, size, 'a'))
-            
+
             return pd.DataFrame(data, columns=['price', 'size', 'side'])
 
     def to_csv(self, path, side=None, nlevels=None):
@@ -552,7 +553,7 @@ class LOB():
 
         if side == 'midprice':
             return 0.0
-        
+
         side = _normalize_side(side)
         if side == 'ask':
             remaining = volume
@@ -621,28 +622,28 @@ class LOB():
             List of (side, price, size) tuples where size=0 means delete level
         """
         updates = []
-        
+
         self_bids = dict(self._bids.items())
         self_asks = dict(self._asks.items())
         other_bids = dict(other._bids.items())
         other_asks = dict(other._asks.items())
-        
+
         for price, size in other_bids.items():
             if self_bids.get(price) != size:
                 updates.append(('bid', price, size))
-        
+
         for price in self_bids:
             if price not in other_bids:
                 updates.append(('bid', price, 0))
-        
+
         for price, size in other_asks.items():
             if self_asks.get(price) != size:
                 updates.append(('ask', price, size))
-        
+
         for price in self_asks:
             if price not in other_asks:
                 updates.append(('ask', price, 0))
-        
+
         return updates
 
     def aggq(self, side, nlevel=None, ticks=None, price=None):
@@ -650,7 +651,8 @@ class LOB():
         Aggregate order book quantities based on the specified criteria.
 
         Args:
-            side: 'b' or 'bid' for bids, 'a' or 'ask' for asks - which side of the order book to aggregate
+            side: 'b' or 'bid' for bids, 'a' or 'ask' for asks
+                  - which side of the order book to aggregate
             nlevel: number of top levels to aggregate (e.g., nlevel=3 for top 3 levels)
             ticks: tick distance from the best price to aggregate
             price: price level to aggregate at or beyond

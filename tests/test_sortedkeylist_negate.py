@@ -1,7 +1,8 @@
 import random
-from sortedcontainers import SortedKeyList, SortedListWithKey
 from itertools import chain
+
 import pytest
+from sortedcontainers import SortedKeyList, SortedListWithKey
 
 
 def negate(val):

@@ -1,10 +1,11 @@
+import gc
 import platform
 import string
 import warnings
 
-from lobpy.sorteddict import SortedDict
 import pytest
-import gc
+
+from lobpy.sorteddict import SortedDict
 
 
 def negate(value):
