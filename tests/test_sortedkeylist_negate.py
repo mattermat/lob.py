@@ -80,9 +80,7 @@ def test_update():
     assert len(slt) == 11100
     slt._check()
 
-    values = sorted(
-        (val for val in chain(range(100), range(1000), range(10000))), key=negate
-    )
+    values = sorted((val for val in chain(range(100), range(1000), range(10000))), key=negate)
     assert all(tup[0] == tup[1] for tup in zip(slt, values))
 
 
@@ -328,9 +326,7 @@ def test_islice():
 
     for start in range(53):
         for stop in range(53):
-            assert (
-                list(slt.islice(start, stop, reverse=True)) == values[start:stop][::-1]
-            )
+            assert list(slt.islice(start, stop, reverse=True)) == values[start:stop][::-1]
 
     for start in range(53):
         assert list(slt.islice(start=start)) == values[start:]
@@ -353,29 +349,21 @@ def test_irange():
     for start in range(53):
         for end in range(start, 53):
             assert list(slt.irange(end, start)) == values[start : (end + 1)][::-1]
-            assert (
-                list(slt.irange(end, start, reverse=True)) == values[start : (end + 1)]
-            )
+            assert list(slt.irange(end, start, reverse=True)) == values[start : (end + 1)]
 
     for start in range(53):
         for end in range(start, 53):
             assert (
-                list(slt.irange(end, start, (True, False)))
-                == values[(start + 1) : (end + 1)][::-1]
+                list(slt.irange(end, start, (True, False))) == values[(start + 1) : (end + 1)][::-1]
             )
 
     for start in range(53):
         for end in range(start, 53):
-            assert (
-                list(slt.irange(end, start, (False, True))) == values[start:end][::-1]
-            )
+            assert list(slt.irange(end, start, (False, True))) == values[start:end][::-1]
 
     for start in range(53):
         for end in range(start, 53):
-            assert (
-                list(slt.irange(end, start, (False, False)))
-                == values[(start + 1) : end][::-1]
-            )
+            assert list(slt.irange(end, start, (False, False))) == values[(start + 1) : end][::-1]
 
     for start in range(53):
         assert list(slt.irange(start)) == values[: (start + 1)][::-1]
@@ -657,7 +645,7 @@ def test_repr():
     this = SortedKeyList(range(10), key=negate)
     this._reset(4)
     assert repr(this).startswith(
-        'SortedKeyList([9, 8, 7, 6, 5, 4, 3, 2, 1, 0], key=<function negate at '
+        "SortedKeyList([9, 8, 7, 6, 5, 4, 3, 2, 1, 0], key=<function negate at "
     )
 
 

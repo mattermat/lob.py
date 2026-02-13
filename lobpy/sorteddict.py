@@ -181,7 +181,7 @@ class SortedDict(dict):
             return self._iloc
         except AttributeError:
             warnings.warn(
-                'sorted_dict.iloc is deprecated.' ' Use SortedDict.keys() instead.',
+                "sorted_dict.iloc is deprecated." " Use SortedDict.keys() instead.",
                 DeprecationWarning,
                 stacklevel=2,
             )
@@ -343,7 +343,7 @@ class SortedDict(dict):
     class _NotGiven:
         # pylint: disable=too-few-public-methods
         def __repr__(self):
-            return '<not-given>'
+            return "<not-given>"
 
     __not_given = _NotGiven()
 
@@ -408,7 +408,7 @@ class SortedDict(dict):
 
         """
         if not self:
-            raise KeyError('popitem(): dictionary is empty')
+            raise KeyError("popitem(): dictionary is empty")
 
         key = self._list_pop(index)
         value = dict.pop(self, key)
@@ -528,10 +528,10 @@ class SortedDict(dict):
         """
         _key = self._key
         type_name = type(self).__name__
-        key_arg = '' if _key is None else f'{_key!r}, '
-        item_format = '{!r}: {!r}'.format
-        items = ', '.join(item_format(key, self[key]) for key in self._list)
-        return f'{type_name}({key_arg}{{{items}}})'
+        key_arg = "" if _key is None else f"{_key!r}, "
+        item_format = "{!r}: {!r}".format
+        items = ", ".join(item_format(key, self[key]) for key in self._list)
+        return f"{type_name}({key_arg}{{{items}}})"
 
     def _check(self):
         """Check invariants of sorted dict.

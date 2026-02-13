@@ -6,14 +6,16 @@ from .sorteddict import SortedDict
 def neg(x: int) -> int:
     return -x
 
+
 def _normalize_side(side: str) -> str:
     """Normalize side parameter to long form ('bid' or 'ask')."""
-    if side in ('b', 'bid'):
-        return 'bid'
-    elif side in ('a', 'ask'):
-        return 'ask'
+    if side in ("b", "bid"):
+        return "bid"
+    elif side in ("a", "ask"):
+        return "ask"
     else:
         return side
+
 
 class PriceAccessor:
     def __init__(self, data):
@@ -23,7 +25,7 @@ class PriceAccessor:
         items = list(self._data.items())
         if index < len(items):
             return items[index][0]
-        return .0
+        return 0.0
 
     def __eq__(self, other):
         if isinstance(other, PriceAccessor):
@@ -33,6 +35,7 @@ class PriceAccessor:
     def __repr__(self):
         return str(self[0])
 
+
 class QuantityAccessor:
     def __init__(self, data):
         self._data = data
@@ -41,7 +44,7 @@ class QuantityAccessor:
         items = list(self._data.items())
         if index < len(items):
             return items[index][1]
-        return .0
+        return 0.0
 
     def __eq__(self, other):
         if isinstance(other, QuantityAccessor):
@@ -50,6 +53,7 @@ class QuantityAccessor:
 
     def __repr__(self):
         return str(self[0])
+
 
 class VolumeImbalanceAccessor:
     def __init__(self, bids, asks):
@@ -76,6 +80,7 @@ class VolumeImbalanceAccessor:
     def __repr__(self):
         return str(self[0])
 
+
 def _get_levels(data, nlevels=None):
     """Helper to get levels from SortedDict, optionally limiting nlevels."""
     items = list(data.items())
@@ -83,7 +88,8 @@ def _get_levels(data, nlevels=None):
         items = items[:nlevels]
     return items
 
-class LOB():
+
+class LOB:
 
     def __init__(self, name=None, tick_size=1, *, bids=None, asks=None) -> None:
         if name is None:
@@ -92,7 +98,7 @@ class LOB():
         self._bids = SortedDict(neg)
         self._asks = SortedDict()
         self.tick_size = tick_size
-        self.timestamp = int(time.time()*1000)
+        self.timestamp = int(time.time() * 1000)
         self._crossing_detected = False
 
         if bids is None:
@@ -138,7 +144,7 @@ class LOB():
 
         for side, price, size in updates:
             side = _normalize_side(side)
-            if side == 'bid':
+            if side == "bid":
                 if size == 0:
                     save_bids.pop(price, None)
                 else:
@@ -184,7 +190,7 @@ class LOB():
         try:
             del self._asks[price_level]
         except KeyError:
-            pass # TODO: error message
+            pass  # TODO: error message
         return
 
     def _delete_bid_level(self, price_level, timestamp=0):
@@ -193,9 +199,8 @@ class LOB():
         try:
             del self._bids[price_level]
         except KeyError:
-            pass # TODO: error message
+            pass  # TODO: error message
         return
-
 
     def update(self, side, price_level, size, timestamp=0):
         if timestamp != 0:
@@ -261,7 +266,7 @@ class LOB():
         bid_price = self.bid[0]
         if ask_price > 0 and bid_price > 0:
             return ask_price - bid_price
-        return float('nan')
+        return float("nan")
 
     @property
     def spread_tick(self):
@@ -270,7 +275,7 @@ class LOB():
         """
         spread = self.spread
         if spread != spread:
-            return float('nan')
+            return float("nan")
         return spread / self.tick_size
 
     @property
@@ -281,7 +286,7 @@ class LOB():
         bid_price = self.bid[0]
         if bid_price > 0:
             return self.spread / bid_price
-        return float('nan')
+        return float("nan")
 
     @property
     def midprice(self):
@@ -292,7 +297,7 @@ class LOB():
         bid_price = self.bid[0]
         if ask_price > 0 and bid_price > 0:
             return (bid_price + ask_price) / 2
-        return float('nan')
+        return float("nan")
 
     @property
     def vw_midprice(self):
@@ -306,7 +311,7 @@ class LOB():
         if ask_price > 0 and bid_price > 0 and ask_size > 0 and bid_size > 0:
             total_size = ask_size + bid_size
             return (bid_price * bid_size + ask_price * ask_size) / total_size
-        return float('nan')
+        return float("nan")
 
     @property
     def bidq(self):
@@ -410,12 +415,12 @@ class LOB():
         """
         import numpy as np
 
-        if side == 'b':
+        if side == "b":
             levels = _get_levels(self._bids, nlevels)
             if not levels:
                 return np.empty((0, 2))
             return np.array(levels, dtype=float)
-        elif side == 'a':
+        elif side == "a":
             levels = _get_levels(self._asks, nlevels)
             if not levels:
                 return np.empty((0, 2))
@@ -439,9 +444,9 @@ class LOB():
 
             data = []
             for price, size in bid_levels:
-                data.append(('b', price, size))
+                data.append(("b", price, size))
             for price, size in ask_levels:
-                data.append(('a', price, size))
+                data.append(("a", price, size))
 
             return np.array(data, dtype=object)
 
@@ -468,12 +473,12 @@ class LOB():
                 "Install it with: pip install pandas[export]"
             ) from e
 
-        if side == 'b':
+        if side == "b":
             levels = _get_levels(self._bids, nlevels)
-            return pd.DataFrame(levels, columns=['price', 'size'])
-        elif side == 'a':
+            return pd.DataFrame(levels, columns=["price", "size"])
+        elif side == "a":
             levels = _get_levels(self._asks, nlevels)
-            return pd.DataFrame(levels, columns=['price', 'size'])
+            return pd.DataFrame(levels, columns=["price", "size"])
         else:
             if nlevels is None:
                 bid_levels = _get_levels(self._bids)
@@ -490,11 +495,11 @@ class LOB():
 
             data = []
             for price, size in bid_levels:
-                data.append((price, size, 'b'))
+                data.append((price, size, "b"))
             for price, size in ask_levels:
-                data.append((price, size, 'a'))
+                data.append((price, size, "a"))
 
-            return pd.DataFrame(data, columns=['price', 'size', 'side'])
+            return pd.DataFrame(data, columns=["price", "size", "side"])
 
     def to_csv(self, path, side=None, nlevels=None):
         """
@@ -518,7 +523,7 @@ class LOB():
             nlevels: number of top levels to export (default: all levels)
         """
         df = self.to_pd(side, nlevels)
-        df.to_excel(path, index=False, engine='openpyxl')
+        df.to_excel(path, index=False, engine="openpyxl")
 
     def to_parquet(self, path, side=None, nlevels=None):
         """
@@ -530,7 +535,7 @@ class LOB():
             nlevels: number of top levels to export (default: all levels)
         """
         df = self.to_pd(side, nlevels)
-        df.to_parquet(path, engine='pyarrow')
+        df.to_parquet(path, engine="pyarrow")
 
     def check(self):
         """
@@ -546,7 +551,7 @@ class LOB():
         ask_price = self.ask[0]
         return bid_price < ask_price
 
-    def get_slippage(self, volume, side='midprice'):
+    def get_slippage(self, volume, side="midprice"):
         """
         Calculate the slippage from the top level.
 
@@ -560,11 +565,11 @@ class LOB():
         if volume <= 0:
             return 0.0
 
-        if side == 'midprice':
+        if side == "midprice":
             return 0.0
 
         side = _normalize_side(side)
-        if side == 'ask':
+        if side == "ask":
             remaining = volume
             total_cost = 0.0
             ask_items = list(self._asks.items())
@@ -575,10 +580,10 @@ class LOB():
                 total_cost += take * price
                 remaining -= take
             if remaining > 0:
-                return float('inf')
+                return float("inf")
             avg_price = total_cost / volume
             return avg_price - self.midprice
-        elif side == 'bid':
+        elif side == "bid":
             remaining = volume
             total_cost = 0.0
             bid_items = list(self._bids.items())
@@ -589,7 +594,7 @@ class LOB():
                 total_cost += take * price
                 remaining -= take
             if remaining > 0:
-                return float('inf')
+                return float("inf")
             avg_price = total_cost / volume
             return self.midprice - avg_price
         else:
@@ -607,15 +612,15 @@ class LOB():
             number of ticks from the top level
         """
         side = _normalize_side(side)
-        if side == 'bid':
+        if side == "bid":
             best_price = self.bid[0]
             if best_price <= 0:
-                return float('inf')
+                return float("inf")
             return int(round((best_price - price) / self.tick_size))
-        elif side == 'ask':
+        elif side == "ask":
             best_price = self.ask[0]
             if best_price <= 0:
-                return float('inf')
+                return float("inf")
             return int(round((price - best_price) / self.tick_size))
         else:
             raise ValueError(f"Invalid side: {side}. Must be 'b'/'bid' or 'a'/'ask'.")
@@ -639,19 +644,19 @@ class LOB():
 
         for price, size in other_bids.items():
             if self_bids.get(price) != size:
-                updates.append(('bid', price, size))
+                updates.append(("bid", price, size))
 
         for price in self_bids:
             if price not in other_bids:
-                updates.append(('bid', price, 0))
+                updates.append(("bid", price, 0))
 
         for price, size in other_asks.items():
             if self_asks.get(price) != size:
-                updates.append(('ask', price, size))
+                updates.append(("ask", price, size))
 
         for price in self_asks:
             if price not in other_asks:
-                updates.append(('ask', price, 0))
+                updates.append(("ask", price, 0))
 
         return updates
 
@@ -673,10 +678,10 @@ class LOB():
             ValueError: if side is invalid or no aggregation criterion is specified
         """
         side = _normalize_side(side)
-        if side not in ('bid', 'ask'):
+        if side not in ("bid", "ask"):
             raise ValueError(f"Invalid side: {side}. Must be 'b'/'bid' or 'a'/'ask'.")
 
-        data = self._bids if side == 'bid' else self._asks
+        data = self._bids if side == "bid" else self._asks
         items = list(data.items())
 
         if not items:
@@ -686,7 +691,7 @@ class LOB():
             levels = items[:nlevel]
             return sum(size for _, size in levels)
         elif ticks is not None:
-            if side == 'bid':
+            if side == "bid":
                 best_price = items[0][0]
                 if best_price <= 0:
                     return 0.0
@@ -700,7 +705,7 @@ class LOB():
                 levels = [(p, s) for p, s in items if p <= max_price]
             return sum(size for _, size in levels)
         elif price is not None:
-            if side == 'bid':
+            if side == "bid":
                 levels = [(p, s) for p, s in items if p >= price]
             else:
                 levels = [(p, s) for p, s in items if p <= price]

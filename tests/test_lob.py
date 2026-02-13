@@ -6,6 +6,7 @@ from lobpy.lob import LOB
 try:
     import numpy as np
     import pandas as pd
+
     HAS_NUMPY = True
     HAS_PANDAS = True
 except ImportError:
@@ -50,7 +51,7 @@ class TestLOBSetUpdates:
     def test_set_updates_with_long_form(self):
         """Test set_updates with long form side parameters ('bid', 'ask')."""
         lob = LOB()
-        lob.set_updates([('bid', 100, 10), ('bid', 99, 5), ('ask', 101, 8), ('ask', 102, 4)])
+        lob.set_updates([("bid", 100, 10), ("bid", 99, 5), ("ask", 101, 8), ("ask", 102, 4)])
 
         assert len(lob._bids) == 2
         assert len(lob._asks) == 2
@@ -62,7 +63,7 @@ class TestLOBSetUpdates:
     def test_set_updates_with_short_form(self):
         """Test set_updates with short form side parameters ('b', 'a')."""
         lob = LOB()
-        lob.set_updates([('b', 100, 10), ('b', 99, 5), ('a', 101, 8), ('a', 102, 4)])
+        lob.set_updates([("b", 100, 10), ("b", 99, 5), ("a", 101, 8), ("a", 102, 4)])
 
         assert len(lob._bids) == 2
         assert len(lob._asks) == 2
@@ -74,7 +75,7 @@ class TestLOBSetUpdates:
     def test_set_updates_mixed_forms(self):
         """Test set_updates with mixed short and long form side parameters."""
         lob = LOB()
-        lob.set_updates([('bid', 100, 10), ('b', 99, 5), ('ask', 101, 8), ('a', 102, 4)])
+        lob.set_updates([("bid", 100, 10), ("b", 99, 5), ("ask", 101, 8), ("a", 102, 4)])
 
         assert len(lob._bids) == 2
         assert len(lob._asks) == 2
@@ -89,7 +90,7 @@ class TestLOBSetUpdates:
         lob.set_snapshot([(100, 10), (99, 5)], [(101, 8), (102, 4)])
 
         # Delete level with zero size using short form
-        lob.set_updates([('b', 100, 0), ('a', 101, 0)])
+        lob.set_updates([("b", 100, 0), ("a", 101, 0)])
 
         assert 100 not in lob._bids
         assert 101 not in lob._asks
@@ -100,7 +101,7 @@ class TestLOBSetUpdates:
         """Test set_updates with timestamp using short form."""
         lob = LOB()
         timestamp = 1234567890
-        lob.set_updates([('b', 100, 10), ('a', 101, 8)], timestamp=timestamp)
+        lob.set_updates([("b", 100, 10), ("a", 101, 8)], timestamp=timestamp)
 
         assert lob.timestamp == timestamp
 
@@ -355,13 +356,16 @@ class TestLOBProperties:
         lob = LOB()
         lob.set_snapshot([(100, 10)], [])
         import math
+
         assert math.isnan(lob.spread)
 
     def test_spread_property_empty(self):
         """Test spread returns nan when empty."""
         lob = LOB()
         import math
+
         assert math.isnan(lob.spread)
+
 
 class TestLOBGetDelta:
     """Test get_delta functionality."""
@@ -372,12 +376,12 @@ class TestLOBGetDelta:
 
         bid_deltas, ask_deltas = lob.get_delta(
             [(100, 15), (98, 3)],  # Changed 100, added 98, removed 99
-            [(101, 8), (102, 4)]   # Added 102
+            [(101, 8), (102, 4)],  # Added 102
         )
 
         assert len(bid_deltas) == 3
         assert (100, 15) in bid_deltas  # Changed
-        assert (98, 3) in bid_deltas    # Added
+        assert (98, 3) in bid_deltas  # Added
         assert (99, 0.0) in bid_deltas  # Deleted
         assert len(ask_deltas) == 1
         assert (102, 4) in ask_deltas
@@ -386,10 +390,7 @@ class TestLOBGetDelta:
         """Test get_delta when nothing changes."""
         lob = LOB(bids=[(100, 10)], asks=[(101, 8)])
 
-        bid_deltas, ask_deltas = lob.get_delta(
-            [(100, 10)],
-            [(101, 8)]
-        )
+        bid_deltas, ask_deltas = lob.get_delta([(100, 10)], [(101, 8)])
 
         assert len(bid_deltas) == 0
         assert len(ask_deltas) == 0
@@ -431,10 +432,7 @@ class TestLOBGetDelta:
         """Test get_delta when all levels are new."""
         lob = LOB()
 
-        bid_deltas, ask_deltas = lob.get_delta(
-            [(100, 10), (99, 5)],
-            [(101, 8), (102, 4)]
-        )
+        bid_deltas, ask_deltas = lob.get_delta([(100, 10), (99, 5)], [(101, 8), (102, 4)])
 
         assert len(bid_deltas) == 2
         assert len(ask_deltas) == 2
@@ -443,15 +441,12 @@ class TestLOBGetDelta:
         """Test get_delta with complex scenario from docstring example."""
         lob = LOB(bids=[(100, 10), (99, 5)], asks=[])
 
-        bid_deltas, ask_deltas = lob.get_delta(
-            [(100, 15), (98, 3)],
-            []
-        )
+        bid_deltas, ask_deltas = lob.get_delta([(100, 15), (98, 3)], [])
 
         assert len(bid_deltas) == 3
         assert (100, 15) in bid_deltas  # Changed
         assert (99, 0.0) in bid_deltas  # Deleted
-        assert (98, 3) in bid_deltas    # Added
+        assert (98, 3) in bid_deltas  # Added
 
 
 class TestLOBRepr:
@@ -548,7 +543,7 @@ class TestLOBAggq:
         lob.set_snapshot([], [(101, 8), (102, 4), (103, 2), (104, 6)])
 
         # Sum top 3 ask levels: 8 + 4 + 2 = 14
-        assert lob.aggq('ask', nlevel=3) == 14
+        assert lob.aggq("ask", nlevel=3) == 14
 
     def test_aggq_bid_nlevels(self):
         """Test aggq for bids with nlevel parameter."""
@@ -556,7 +551,7 @@ class TestLOBAggq:
         lob.set_snapshot([(100, 10), (99, 5), (98, 3), (97, 2)], [])
 
         # Sum top 3 bid levels: 10 + 5 + 3 = 18
-        assert lob.aggq('bid', nlevel=3) == 18
+        assert lob.aggq("bid", nlevel=3) == 18
 
     def test_aggq_bid_with_floats(self):
         """Test aggq for bids with float prices and sizes."""
@@ -564,22 +559,21 @@ class TestLOBAggq:
         lob.set_snapshot([(100.5, 10.25), (99.75, 5.5), (98.5, 3.75)], [])
 
         # Sum all bid levels: 10.25 + 5.5 + 3.75 = 19.5
-        assert lob.aggq('bid', nlevel=3) == 19.5
+        assert lob.aggq("bid", nlevel=3) == 19.5
 
     def test_aggq_ask_empty(self):
         """Test aggq for asks when no asks."""
         lob = LOB()
         lob.set_snapshot([(100, 10)], [])
 
-         # assert lob.aggq('ask', nlevel=10) == 0.0
-        assert lob.aggq('ask', nlevel=10) == 0.0
-        assert lob.aggq('bid', nlevel=10) == 10.0
+        # assert lob.aggq('ask', nlevel=10) == 0.0
+        assert lob.aggq("ask", nlevel=10) == 0.0
+        assert lob.aggq("bid", nlevel=10) == 10.0
 
     def test_aggq_bid_empty(self):
         """Test aggq for bids when no bids."""
         lob = LOB()
         lob.set_snapshot([], [(101, 8)])
-
 
     def test_aggq_ask_one_level(self):
         """Test aggq for asks with nlevel=1."""
@@ -587,7 +581,7 @@ class TestLOBAggq:
         lob.set_snapshot([], [(101, 8), (102, 4), (103, 2)])
 
         # Sum top 1 ask level: 8
-        assert lob.aggq('ask', nlevel=1) == 8
+        assert lob.aggq("ask", nlevel=1) == 8
 
     def test_aggq_bid_one_level(self):
         """Test aggq for bids with nlevel=1."""
@@ -595,21 +589,21 @@ class TestLOBAggq:
         lob.set_snapshot([(100, 10), (99, 5), (98, 3)], [])
 
         # Sum top 1 bid level: 10
-        assert lob.aggq('bid', nlevel=1) == 10
+        assert lob.aggq("bid", nlevel=1) == 10
 
     def test_aggq_ask_nlevel_zero(self):
         """Test aggq for asks with nlevel=0."""
         lob = LOB()
         lob.set_snapshot([], [(101, 8), (102, 4), (103, 2)])
 
-        assert lob.aggq('ask', nlevel=0) == 0.0
+        assert lob.aggq("ask", nlevel=0) == 0.0
 
     def test_aggq_bid_nlevel_zero(self):
         """Test aggq for bids with nlevel=0."""
         lob = LOB()
         lob.set_snapshot([(100, 10), (99, 5), (98, 3)], [])
 
-        assert lob.aggq('bid', nlevel=0) == 0.0
+        assert lob.aggq("bid", nlevel=0) == 0.0
 
     def test_aggq_ask_nlevel_exceeds_levels(self):
         """Test aggq for asks when nlevel > available levels."""
@@ -617,14 +611,14 @@ class TestLOBAggq:
         lob.set_snapshot([], [(101, 8), (102, 4)])
 
         # nlevel=5 but only 2 levels exist, sum all: 8 + 4 = 12
-        assert lob.aggq('ask', nlevel=5) == 12
+        assert lob.aggq("ask", nlevel=5) == 12
 
     def test_aggq_bid_nlevel_exceeds_levels(self):
         """Test aggq for bids when nlevel > available levels."""
         lob = LOB()
         lob.set_snapshot([(100, 10), (99, 5)], [])
 
-        assert lob.aggq('bid', nlevel=10) == 15
+        assert lob.aggq("bid", nlevel=10) == 15
 
     def test_aggq_ask_large_ticks(self):
         """Test aggq for asks with ticks parameter that includes all levels."""
@@ -633,7 +627,7 @@ class TestLOBAggq:
         lob.set_snapshot([], [(101, 8), (101.5, 4), (102, 2)])
 
         # Sum all asks (within large tick count): 8 + 4 + 2 = 14
-        assert lob.aggq('ask', ticks=100) == 14
+        assert lob.aggq("ask", ticks=100) == 14
 
     def test_aggq_bid_ticks_boundary(self):
         """Test aggq for bids with ticks at boundary."""
@@ -643,7 +637,7 @@ class TestLOBAggq:
 
         # Within 2 ticks from top (100, 99): 10 + 5 = 15
         # 98 is at 100 - 2 = 98, which is exactly 2 ticks away, so included
-        assert lob.aggq('bid', ticks=2) == 10 + 5 + 3 == 18
+        assert lob.aggq("bid", ticks=2) == 10 + 5 + 3 == 18
 
     def test_aggq_price_boundary(self):
         """Test aggq for asks with price at boundary."""
@@ -651,49 +645,46 @@ class TestLOBAggq:
         lob.set_snapshot([], [(105, 8), (103, 4), (102, 2), (101, 6)])
 
         # At price <= 103.5: 6 + 2 + 4 = 12
-        assert lob.aggq('ask', price=103.5) == 12
+        assert lob.aggq("ask", price=103.5) == 12
         # At price <= 103 is the same
-        assert lob.aggq('ask', price=103) == 12
+        assert lob.aggq("ask", price=103) == 12
 
     def test_aggq_with_short_form(self):
         """Test aggq with short form side parameters ('b', 'a')."""
         lob = LOB()
         lob.set_snapshot(
-            [(100, 10), (99, 5), (98, 3), (97, 2)],
-            [(101, 8), (102, 4), (103, 2), (104, 6)]
+            [(100, 10), (99, 5), (98, 3), (97, 2)], [(101, 8), (102, 4), (103, 2), (104, 6)]
         )
 
         # Test with short form 'b' for bids
-        assert lob.aggq('b', nlevel=3) == 18
+        assert lob.aggq("b", nlevel=3) == 18
         # Test with short form 'a' for asks
-        assert lob.aggq('a', nlevel=3) == 14
+        assert lob.aggq("a", nlevel=3) == 14
 
     def test_aggq_short_form_with_ticks(self):
         """Test aggq with short form and ticks parameter."""
         lob = LOB()
         lob._set_tick_size(1.0)
         lob.set_snapshot(
-            [(100, 10), (99, 5), (98, 3), (97, 2)],
-            [(101, 8), (102, 4), (103, 2), (104, 6)]
+            [(100, 10), (99, 5), (98, 3), (97, 2)], [(101, 8), (102, 4), (103, 2), (104, 6)]
         )
 
         # Test with short form 'b' and ticks
-        assert lob.aggq('b', ticks=2) == 18
+        assert lob.aggq("b", ticks=2) == 18
         # Test with short form 'a' and ticks
-        assert lob.aggq('a', ticks=2) == 14
+        assert lob.aggq("a", ticks=2) == 14
 
     def test_aggq_short_form_with_price(self):
         """Test aggq with short form and price parameter."""
         lob = LOB()
         lob.set_snapshot(
-            [(100, 10), (99, 5), (98, 3), (97, 2)],
-            [(105, 8), (103, 4), (102, 2), (101, 6)]
+            [(100, 10), (99, 5), (98, 3), (97, 2)], [(105, 8), (103, 4), (102, 2), (101, 6)]
         )
 
         # Test with short form 'b' and price
-        assert lob.aggq('b', price=98) == 10 + 5 + 3
+        assert lob.aggq("b", price=98) == 10 + 5 + 3
         # Test with short form 'a' and price
-        assert lob.aggq('a', price=103) == 6 + 2 + 4
+        assert lob.aggq("a", price=103) == 6 + 2 + 4
 
 
 class TestLOBToNumpy:
@@ -703,12 +694,12 @@ class TestLOBToNumpy:
         lob = LOB()
         lob.set_snapshot([(100, 10), (99, 5), (98, 3)], [])
 
-        result = lob.to_np(side='b')
+        result = lob.to_np(side="b")
 
         assert result.shape == (3, 2)
         # Check ordering (best bid first)
         assert result[0, 0] == 100  # Best bid price
-        assert result[0, 1] == 10   # Best bid size
+        assert result[0, 1] == 10  # Best bid size
         assert result[1, 0] == 99
         assert result[1, 1] == 5
         assert result[2, 0] == 98
@@ -718,12 +709,12 @@ class TestLOBToNumpy:
         lob = LOB()
         lob.set_snapshot([], [(101, 8), (102, 4), (103, 2)])
 
-        result = lob.to_np(side='a')
+        result = lob.to_np(side="a")
 
         assert result.shape == (3, 2)
         # Check ordering (best ask first)
         assert result[0, 0] == 101  # Best ask price
-        assert result[0, 1] == 8    # Best ask size
+        assert result[0, 1] == 8  # Best ask size
         assert result[1, 0] == 102
         assert result[1, 1] == 4
         assert result[2, 0] == 103
@@ -731,34 +722,31 @@ class TestLOBToNumpy:
 
         """Test to_np with side=None for both sides."""
         lob = LOB()
-        lob.set_snapshot(
-            [(100, 10), (99, 5)],
-            [(101, 8), (102, 4)]
-        )
+        lob.set_snapshot([(100, 10), (99, 5)], [(101, 8), (102, 4)])
 
         result = lob.to_np(side=None)
 
         assert result.shape == (4, 3)
         # Bids first (best to worst)
-        assert result[0, 0] == 'b'   # Side column
-        assert result[0, 1] == 100   # Price
-        assert result[0, 2] == 10    # Size
-        assert result[1, 0] == 'b'
+        assert result[0, 0] == "b"  # Side column
+        assert result[0, 1] == 100  # Price
+        assert result[0, 2] == 10  # Size
+        assert result[1, 0] == "b"
         assert result[1, 1] == 99
         assert result[1, 2] == 5
         # Then asks (best to worst)
-        assert result[2, 0] == 'a'   # Side column
-        assert result[2, 1] == 101   # Price
-        assert result[2, 2] == 8    # Size
-        assert result[3, 0] == 'a'
+        assert result[2, 0] == "a"  # Side column
+        assert result[2, 1] == 101  # Price
+        assert result[2, 2] == 8  # Size
+        assert result[3, 0] == "a"
         assert result[3, 1] == 102
         assert result[3, 2] == 4
 
         """Test to_np with empty order book."""
         lob = LOB()
 
-        result_bids = lob.to_np(side='b')
-        result_asks = lob.to_np(side='a')
+        result_bids = lob.to_np(side="b")
+        result_asks = lob.to_np(side="a")
         result_both = lob.to_np(side=None)
 
         assert result_bids.shape == (0, 2)
@@ -767,13 +755,10 @@ class TestLOBToNumpy:
 
         """Test to_np with nlevels parameter."""
         lob = LOB()
-        lob.set_snapshot(
-            [(100, 10), (99, 5), (98, 3), (97, 2)],
-            [(101, 8), (102, 4), (103, 2)]
-        )
+        lob.set_snapshot([(100, 10), (99, 5), (98, 3), (97, 2)], [(101, 8), (102, 4), (103, 2)])
 
-        result_bids = lob.to_np(side='b', nlevels=2)
-        result_asks = lob.to_np(side='a', nlevels=2)
+        result_bids = lob.to_np(side="b", nlevels=2)
+        result_asks = lob.to_np(side="a", nlevels=2)
         result_both = lob.to_np(side=None, nlevels=3)
 
         assert result_bids.shape == (2, 2)
@@ -786,9 +771,9 @@ class TestLOBToNumpy:
 
         assert result_both.shape == (3, 3)
         # 2 bids + 1 ask = 3 levels
-        assert result_both[0, 0] == 'b'
-        assert result_both[1, 0] == 'b'
-        assert result_both[2, 0] == 'a'
+        assert result_both[0, 0] == "b"
+        assert result_both[1, 0] == "b"
+        assert result_both[2, 0] == "a"
 
         """Test to_np with float prices and sizes."""
         lob = LOB()
@@ -812,86 +797,80 @@ class TestLOBToPandas:
         lob = LOB()
         lob.set_snapshot([(100, 10), (99, 5), (98, 3)], [])
 
-        df = lob.to_pd(side='b')
+        df = lob.to_pd(side="b")
 
         assert df.shape == (3, 2)
-        assert list(df.columns) == ['price', 'size']
+        assert list(df.columns) == ["price", "size"]
         # Check ordering
-        assert df.iloc[0]['price'] == 100
-        assert df.iloc[0]['size'] == 10
-        assert df.iloc[1]['price'] == 99
-        assert df.iloc[2]['price'] == 98
+        assert df.iloc[0]["price"] == 100
+        assert df.iloc[0]["size"] == 10
+        assert df.iloc[1]["price"] == 99
+        assert df.iloc[2]["price"] == 98
 
     def test_to_pd_asks(self):
         """Test to_pd with side='a' for asks."""
         lob = LOB()
         lob.set_snapshot([], [(101, 8), (102, 4), (103, 2)])
 
-        df = lob.to_pd(side='a')
+        df = lob.to_pd(side="a")
 
         assert df.shape == (3, 2)
-        assert list(df.columns) == ['price', 'size']
-        assert df.iloc[0]['price'] == 101
-        assert df.iloc[0]['size'] == 8
-        assert df.iloc[1]['price'] == 102
-        assert df.iloc[2]['price'] == 103
+        assert list(df.columns) == ["price", "size"]
+        assert df.iloc[0]["price"] == 101
+        assert df.iloc[0]["size"] == 8
+        assert df.iloc[1]["price"] == 102
+        assert df.iloc[2]["price"] == 103
 
     def test_to_pd_both_sides(self):
         """Test to_pd with side=None for both sides."""
         lob = LOB()
-        lob.set_snapshot(
-            [(100, 10), (99, 5)],
-            [(101, 8), (102, 4)]
-        )
+        lob.set_snapshot([(100, 10), (99, 5)], [(101, 8), (102, 4)])
 
         df = lob.to_pd(side=None)
 
         assert df.shape == (4, 3)
-        assert list(df.columns) == ['price', 'size', 'side']
+        assert list(df.columns) == ["price", "size", "side"]
         # Bids first
-        assert df.iloc[0]['side'] == 'b'
-        assert df.iloc[0]['price'] == 100
-        assert df.iloc[0]['size'] == 10
-        assert df.iloc[1]['side'] == 'b'
-        assert df.iloc[1]['price'] == 99
+        assert df.iloc[0]["side"] == "b"
+        assert df.iloc[0]["price"] == 100
+        assert df.iloc[0]["size"] == 10
+        assert df.iloc[1]["side"] == "b"
+        assert df.iloc[1]["price"] == 99
         # Then asks
-        assert df.iloc[2]['side'] == 'a'
-        assert df.iloc[2]['price'] == 101
-        assert df.iloc[3]['side'] == 'a'
-        assert df.iloc[3]['price'] == 102
+        assert df.iloc[2]["side"] == "a"
+        assert df.iloc[2]["price"] == 101
+        assert df.iloc[3]["side"] == "a"
+        assert df.iloc[3]["price"] == 102
 
     def test_to_pd_empty_book(self):
         """Test to_pd with empty order book."""
         lob = LOB()
 
-        df_bids = lob.to_pd(side='b')
-        df_asks = lob.to_pd(side='a')
+        df_bids = lob.to_pd(side="b")
+        df_asks = lob.to_pd(side="a")
         df_both = lob.to_pd(side=None)
 
         assert len(df_bids) == 0
         assert len(df_asks) == 0
         assert len(df_both) == 0
-        assert list(df_bids.columns) == ['price', 'size']
-        assert list(df_asks.columns) == ['price', 'size']
-        assert list(df_both.columns) == ['price', 'size', 'side']
+        assert list(df_bids.columns) == ["price", "size"]
+        assert list(df_asks.columns) == ["price", "size"]
+        assert list(df_both.columns) == ["price", "size", "side"]
 
     def test_to_pd_with_nlevels(self):
         """Test to_pd with nlevels parameter."""
         lob = LOB()
-        lob.set_snapshot(
-            [(100, 10), (99, 5), (98, 3)],
-            [(101, 8), (102, 4)]
-        )
+        lob.set_snapshot([(100, 10), (99, 5), (98, 3)], [(101, 8), (102, 4)])
 
         df = lob.to_pd(side=None, nlevels=2)
 
         assert len(df) == 2
         # Only best bid
-        assert df.iloc[0]['side'] == 'b'
-        assert df.iloc[0]['price'] == 100
+        assert df.iloc[0]["side"] == "b"
+        assert df.iloc[0]["price"] == 100
         # And best ask
-        assert df.iloc[1]['side'] == 'a'
-        assert df.iloc[1]['price'] == 101
+        assert df.iloc[1]["side"] == "a"
+        assert df.iloc[1]["price"] == 101
 
     def test_to_pd_with_floats(self):
         """Test to_pd with float prices and sizes."""
@@ -900,12 +879,12 @@ class TestLOBToPandas:
 
         df = lob.to_pd(side=None)
 
-        assert df.iloc[0]['price'] == 100.5
-        assert df.iloc[0]['size'] == 10.25
-        assert df.iloc[0]['side'] == 'b'
-        assert df.iloc[1]['price'] == 101.75
-        assert df.iloc[1]['size'] == 8.5
-        assert df.iloc[1]['side'] == 'a'
+        assert df.iloc[0]["price"] == 100.5
+        assert df.iloc[0]["size"] == 10.25
+        assert df.iloc[0]["side"] == "b"
+        assert df.iloc[1]["price"] == 101.75
+        assert df.iloc[1]["size"] == 8.5
+        assert df.iloc[1]["side"] == "a"
 
 
 class TestLOBExportCSV:
@@ -916,10 +895,10 @@ class TestLOBExportCSV:
         lob.set_snapshot([(100, 10), (99, 5), (98, 3)], [])
 
         path = tmp_path / "bids.csv"
-        lob.to_csv(path, side='b')
+        lob.to_csv(path, side="b")
 
         assert path.exists()
-        df = lob.to_pd(side='b')
+        df = lob.to_pd(side="b")
         df.to_csv(path, index=False)
         assert path.exists()
 
@@ -929,7 +908,7 @@ class TestLOBExportCSV:
         lob.set_snapshot([], [(101, 8), (102, 4)])
 
         path = tmp_path / "asks.csv"
-        lob.to_csv(path, side='a')
+        lob.to_csv(path, side="a")
 
         assert path.exists()
 
@@ -949,7 +928,7 @@ class TestLOBExportCSV:
         lob.set_snapshot([(100, 10), (99, 5), (98, 3)], [(101, 8), (102, 4)])
 
         path = tmp_path / "nlevels.csv"
-        lob.to_csv(path, side='b', nlevels=2)
+        lob.to_csv(path, side="b", nlevels=2)
 
         assert path.exists()
 
@@ -971,7 +950,7 @@ class TestLOBExportXLSX:
         lob.set_snapshot([(100, 10), (99, 5), (98, 3)], [])
 
         path = tmp_path / "bids.xlsx"
-        lob.to_xlsx(path, side='b')
+        lob.to_xlsx(path, side="b")
 
         assert path.exists()
 
@@ -981,7 +960,7 @@ class TestLOBExportXLSX:
         lob.set_snapshot([], [(101, 8), (102, 4), (103, 2)])
 
         path = tmp_path / "asks.xlsx"
-        lob.to_xlsx(path, side='a')
+        lob.to_xlsx(path, side="a")
 
         assert path.exists()
 
@@ -1001,7 +980,7 @@ class TestLOBExportXLSX:
         lob.set_snapshot([(100, 10), (99, 5), (98, 3)], [(101, 8), (102, 4)])
 
         path = tmp_path / "nlevels.xlsx"
-        lob.to_xlsx(path, side='b', nlevels=2)
+        lob.to_xlsx(path, side="b", nlevels=2)
 
         assert path.exists()
 
@@ -1023,7 +1002,7 @@ class TestLOBExportParquet:
         lob.set_snapshot([(100, 10), (99, 5), (98, 3)], [])
 
         path = tmp_path / "bids.parquet"
-        lob.to_parquet(path, side='b')
+        lob.to_parquet(path, side="b")
 
         assert path.exists()
 
@@ -1033,7 +1012,7 @@ class TestLOBExportParquet:
         lob.set_snapshot([], [(101, 8), (102, 4), (103, 2)])
 
         path = tmp_path / "asks.parquet"
-        lob.to_parquet(path, side='a')
+        lob.to_parquet(path, side="a")
 
         assert path.exists()
 
@@ -1053,7 +1032,7 @@ class TestLOBExportParquet:
         lob.set_snapshot([(100, 10), (99, 5), (98, 3)], [(101, 8), (102, 4)])
 
         path = tmp_path / "nlevels.parquet"
-        lob.to_parquet(path, side='b', nlevels=2)
+        lob.to_parquet(path, side="b", nlevels=2)
 
         assert path.exists()
 

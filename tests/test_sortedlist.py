@@ -1,4 +1,3 @@
-
 import random
 from itertools import chain
 
@@ -307,9 +306,7 @@ def test_islice():
 
     for start in range(53):
         for stop in range(53):
-            assert (
-                list(sl.islice(start, stop, reverse=True)) == values[start:stop][::-1]
-            )
+            assert list(sl.islice(start, stop, reverse=True)) == values[start:stop][::-1]
 
     for start in range(53):
         assert list(sl.islice(start=start)) == values[start:]
@@ -332,10 +329,7 @@ def test_irange():
     for start in range(53):
         for end in range(start, 53):
             assert list(sl.irange(start, end)) == values[start : (end + 1)]
-            assert (
-                list(sl.irange(start, end, reverse=True))
-                == values[start : (end + 1)][::-1]
-            )
+            assert list(sl.irange(start, end, reverse=True)) == values[start : (end + 1)][::-1]
 
     for start in range(53):
         for end in range(start, 53):
@@ -343,15 +337,11 @@ def test_irange():
 
     for start in range(53):
         for end in range(start, 53):
-            assert list(range(start + 1, end + 1)) == list(
-                sl.irange(start, end, (False, True))
-            )
+            assert list(range(start + 1, end + 1)) == list(sl.irange(start, end, (False, True)))
 
     for start in range(53):
         for end in range(start, 53):
-            assert list(range(start + 1, end)) == list(
-                sl.irange(start, end, (False, False))
-            )
+            assert list(range(start + 1, end)) == list(sl.irange(start, end, (False, False)))
 
     for start in range(53):
         assert list(range(start, 53)) == list(sl.irange(start))
@@ -633,13 +623,13 @@ def test_ge():
 def test_repr():
     this = SortedList(range(10))
     this._reset(4)
-    assert repr(this) == 'SortedList([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])'
+    assert repr(this) == "SortedList([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])"
 
 
 def test_repr_recursion():
     this = SortedList([[1], [2], [3], [4]])
     this._lists[-1].append(this)
-    assert repr(this) == 'SortedList([[1], [2], [3], [4], ...])'
+    assert repr(this) == "SortedList([[1], [2], [3], [4], ...])"
 
 
 def test_repr_subclass():
@@ -647,7 +637,7 @@ def test_repr_subclass():
         pass
 
     this = CustomSortedList([1, 2, 3, 4])
-    assert repr(this) == 'CustomSortedList([1, 2, 3, 4])'
+    assert repr(this) == "CustomSortedList([1, 2, 3, 4])"
 
 
 def test_pickle():

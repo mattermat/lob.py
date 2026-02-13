@@ -9,7 +9,7 @@ from .sorteddict import SortedDict
 class LOBts:
     """Time series of LOB objects indexed by timestamp."""
 
-    def __init__(self, name=None, tick_size=1, mode='delta') -> None:
+    def __init__(self, name=None, tick_size=1, mode="delta") -> None:
         """
         Initialize LOBts.
 
@@ -46,7 +46,7 @@ class LOBts:
             timestamp: Timestamp for this snapshot
             force: If True and timestamp exists, replace it
         """
-        if self._mode == 'latest':
+        if self._mode == "latest":
             self._lobs.clear()
 
         lob = LOB(name=f"{self.name}_t{timestamp}", tick_size=self.tick_size, bids=bids, asks=asks)
@@ -82,10 +82,10 @@ class LOBts:
 
             for side, price, size in updates:
                 # Convert short form side to long form
-                if side == 'b':
-                    side = 'bid'
-                elif side == 'a':
-                    side = 'ask'
+                if side == "b":
+                    side = "bid"
+                elif side == "a":
+                    side = "ask"
                 new_lob.update(side, price, size, 0)
 
             new_lob.timestamp = timestamp
@@ -94,10 +94,10 @@ class LOBts:
             lob = LOB(name=f"{self.name}_t{timestamp}", tick_size=self.tick_size)
             for side, price, size in updates:
                 # Convert short form side to long form
-                if side == 'b':
-                    side = 'bid'
-                elif side == 'a':
-                    side = 'ask'
+                if side == "b":
+                    side = "bid"
+                elif side == "a":
+                    side = "ask"
                 lob.update(side, price, size, 0)
             lob.timestamp = timestamp
             self._lobs[timestamp] = lob
@@ -118,10 +118,10 @@ class LOBts:
             The new LOB object
         """
         # Convert short form side to long form
-        if side == 'b':
-            side = 'bid'
-        elif side == 'a':
-            side = 'ask'
+        if side == "b":
+            side = "bid"
+        elif side == "a":
+            side = "ask"
         return self.set_updates([(side, price_level, size)], timestamp)
 
     def __getitem__(self, timestamp_or_slice):
@@ -230,7 +230,7 @@ class LOBts:
             spreads.append(self._lobs[ts].spread)
             timestamps.append(ts)
 
-        return pd.Series(spreads, index=timestamps, name='spread')
+        return pd.Series(spreads, index=timestamps, name="spread")
 
     def midprice_ts(self, start_ts=None, end_ts=None):
         """
@@ -259,7 +259,7 @@ class LOBts:
             midprices.append((latest.bid[0] + latest.ask[0]) / 2)
             timestamps.append(ts)
 
-        return pd.Series(midprices, index=timestamps, name='midprice')
+        return pd.Series(midprices, index=timestamps, name="midprice")
 
     def bid_ts(self, start_ts=None, end_ts=None):
         """
@@ -287,7 +287,7 @@ class LOBts:
             bids.append(self._lobs[ts].bid[0])
             timestamps.append(ts)
 
-        return pd.Series(bids, index=timestamps, name='bid')
+        return pd.Series(bids, index=timestamps, name="bid")
 
     def ask_ts(self, start_ts=None, end_ts=None):
         """
@@ -315,7 +315,7 @@ class LOBts:
             asks.append(self._lobs[ts].ask[0])
             timestamps.append(ts)
 
-        return pd.Series(asks, index=timestamps, name='ask')
+        return pd.Series(asks, index=timestamps, name="ask")
 
     @property
     def spread(self):
@@ -355,15 +355,15 @@ class LOBts:
             ask_size = latest.askq[0]
             if bid_size + ask_size == 0:
                 import math
+
                 vw_midprices.append(math.nan)
             else:
                 vw_midprices.append(
-                    (bid_price * bid_size + ask_price * ask_size)
-                    / (bid_size + ask_size)
+                    (bid_price * bid_size + ask_price * ask_size) / (bid_size + ask_size)
                 )
             timestamps.append(ts)
 
-        return pd.Series(vw_midprices, index=timestamps, name='vw_midprice')
+        return pd.Series(vw_midprices, index=timestamps, name="vw_midprice")
 
     @property
     def vi(self):
@@ -380,7 +380,7 @@ class LOBts:
             vi_values.append(latest.bidq[0] - latest.askq[0])
             timestamps.append(ts)
 
-        return pd.Series(vi_values, index=timestamps, name='vi')
+        return pd.Series(vi_values, index=timestamps, name="vi")
 
     @property
     def arrival_frequency(self):
@@ -413,7 +413,7 @@ class LOBts:
                 else:
                     old_qty = prev_lob._bids[price]
                     if new_qty > old_qty:
-                        arrivals += (new_qty - old_qty)
+                        arrivals += new_qty - old_qty
 
             for price in curr_lob._asks.keys():
                 new_qty = curr_lob._asks[price]
@@ -422,7 +422,7 @@ class LOBts:
                 else:
                     old_qty = prev_lob._asks[price]
                     if new_qty > old_qty:
-                        arrivals += (new_qty - old_qty)
+                        arrivals += new_qty - old_qty
 
             total_arrivals += arrivals
 
@@ -459,7 +459,7 @@ class LOBts:
                 else:
                     new_qty = curr_lob._bids[price]
                     if new_qty < old_qty:
-                        cancels += (old_qty - new_qty)
+                        cancels += old_qty - new_qty
 
             for price in prev_lob._asks.keys():
                 old_qty = prev_lob._asks[price]
@@ -468,7 +468,7 @@ class LOBts:
                 else:
                     new_qty = curr_lob._asks[price]
                     if new_qty < old_qty:
-                        cancels += (old_qty - new_qty)
+                        cancels += old_qty - new_qty
 
             total_cancels += cancels
 
@@ -548,11 +548,11 @@ class LOBts:
                 continue
             lob = self._lobs[ts]
             for level, (price, size) in enumerate(lob._bids.items()):
-                data.append((ts, 'b', level, price, size))
+                data.append((ts, "b", level, price, size))
             for level, (price, size) in enumerate(lob._asks.items()):
-                data.append((ts, 'a', level, price, size))
+                data.append((ts, "a", level, price, size))
 
-        return pd.DataFrame(data, columns=['timestamp', 'side', 'level', 'price', 'size'])
+        return pd.DataFrame(data, columns=["timestamp", "side", "level", "price", "size"])
 
     def to_np(self, start_ts=None, end_ts=None):
         """
@@ -578,9 +578,9 @@ class LOBts:
                 continue
             lob = self._lobs[ts]
             for level, (price, size) in enumerate(lob._bids.items()):
-                data.append([ts, 'b', level, price, size])
+                data.append([ts, "b", level, price, size])
             for level, (price, size) in enumerate(lob._asks.items()):
-                data.append([ts, 'a', level, price, size])
+                data.append([ts, "a", level, price, size])
 
         return np.array(data, dtype=object)
 
@@ -606,7 +606,7 @@ class LOBts:
             end_ts: End timestamp (inclusive)
         """
         df = self.to_pd(start_ts, end_ts)
-        df.to_excel(path, index=False, engine='openpyxl')
+        df.to_excel(path, index=False, engine="openpyxl")
 
     def to_parquet(self, path, start_ts=None, end_ts=None):
         """
@@ -618,7 +618,7 @@ class LOBts:
             end_ts: End timestamp (inclusive)
         """
         df = self.to_pd(start_ts, end_ts)
-        df.to_parquet(path, engine='pyarrow')
+        df.to_parquet(path, engine="pyarrow")
 
     def __repr__(self) -> str:
         return f"<LOBts[{self.name}] mode={self._mode} snapshots={len(self)}>"

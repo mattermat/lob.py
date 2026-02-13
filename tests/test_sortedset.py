@@ -151,9 +151,7 @@ def test_islice():
 
     for start in range(53):
         for stop in range(53):
-            assert (
-                list(ss.islice(start, stop, reverse=True)) == values[start:stop][::-1]
-            )
+            assert list(ss.islice(start, stop, reverse=True)) == values[start:stop][::-1]
 
     for start in range(53):
         assert list(ss.islice(start=start)) == values[start:]
@@ -176,10 +174,7 @@ def test_irange():
     for start in range(53):
         for end in range(start, 53):
             assert list(ss.irange(start, end)) == values[start : (end + 1)]
-            assert (
-                list(ss.irange(start, end, reverse=True))
-                == values[start : (end + 1)][::-1]
-            )
+            assert list(ss.irange(start, end, reverse=True)) == values[start : (end + 1)][::-1]
 
     for start in range(53):
         for end in range(start, 53):
@@ -187,15 +182,11 @@ def test_irange():
 
     for start in range(53):
         for end in range(start, 53):
-            assert list(range(start + 1, end + 1)) == list(
-                ss.irange(start, end, (False, True))
-            )
+            assert list(range(start + 1, end + 1)) == list(ss.irange(start, end, (False, True)))
 
     for start in range(53):
         for end in range(start, 53):
-            assert list(range(start + 1, end)) == list(
-                ss.irange(start, end, (False, False))
-            )
+            assert list(range(start + 1, end)) == list(ss.irange(start, end, (False, False)))
 
     for start in range(53):
         assert list(range(start, 53)) == list(ss.irange(start))
@@ -504,13 +495,13 @@ class Identity:
         return value
 
     def __repr__(self):
-        return 'identity'
+        return "identity"
 
 
 def test_repr():
     temp = SortedSet(range(0, 10), key=Identity())
     temp._reset(7)
-    assert repr(temp) == 'SortedSet([0, 1, 2, 3, 4, 5, 6, 7, 8, 9], key=identity)'
+    assert repr(temp) == "SortedSet([0, 1, 2, 3, 4, 5, 6, 7, 8, 9], key=identity)"
 
 
 def test_repr_recursion():
@@ -521,8 +512,7 @@ def test_repr_recursion():
     temp = HashableSortedSet([HashableSortedSet([1]), HashableSortedSet([1, 2])])
     temp.add(temp)
     assert (
-        repr(temp)
-        == 'HashableSortedSet([HashableSortedSet([1]), HashableSortedSet([1, 2]), ...])'
+        repr(temp) == "HashableSortedSet([HashableSortedSet([1]), HashableSortedSet([1, 2]), ...])"
     )
 
 

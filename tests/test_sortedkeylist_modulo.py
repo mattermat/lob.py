@@ -362,9 +362,7 @@ def test_iter():
 def test_reversed():
     slt = SortedKeyList(range(10000), key=modulo)
     rev = reversed(slt)
-    assert all(
-        tup[0] == tup[1] for tup in zip(reversed(sorted(range(10000), key=modulo)), rev)
-    )
+    assert all(tup[0] == tup[1] for tup in zip(reversed(sorted(range(10000), key=modulo)), rev))
 
 
 def test_reverse():
@@ -388,9 +386,7 @@ def test_islice():
 
     for start in range(53):
         for stop in range(53):
-            assert (
-                list(sl.islice(start, stop, reverse=True)) == values[start:stop][::-1]
-            )
+            assert list(sl.islice(start, stop, reverse=True)) == values[start:stop][::-1]
 
     for start in range(53):
         assert list(sl.islice(start=start)) == values[start:]
@@ -800,16 +796,14 @@ def test_repr():
     this = SortedKeyList(range(10), key=modulo)
     this._reset(4)
     assert repr(this).startswith(
-        'SortedKeyList([0, 1, 2, 3, 4, 5, 6, 7, 8, 9], key=<function modulo at '
+        "SortedKeyList([0, 1, 2, 3, 4, 5, 6, 7, 8, 9], key=<function modulo at "
     )
 
 
 def test_repr_recursion():
     this = SortedKeyList([[1], [2], [3], [4]], key=lambda val: val)
     this._lists[-1].append(this)
-    assert repr(this).startswith(
-        'SortedKeyList([[1], [2], [3], [4], ...], key=<function '
-    )
+    assert repr(this).startswith("SortedKeyList([[1], [2], [3], [4], ...], key=<function ")
 
 
 def test_repr_subclass():
@@ -819,7 +813,7 @@ def test_repr_subclass():
     this = CustomSortedKeyList(range(10), key=modulo)
     this._reset(4)
     assert repr(this).startswith(
-        'CustomSortedKeyList([0, 1, 2, 3, 4, 5, 6, 7, 8, 9], key=<function modulo at '
+        "CustomSortedKeyList([0, 1, 2, 3, 4, 5, 6, 7, 8, 9], key=<function modulo at "
     )
 
 

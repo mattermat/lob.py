@@ -124,7 +124,7 @@ class SortedSet(MutableSet, Sequence):
         # _set attribute. So only create a new set if the _set attribute is not
         # already present.
 
-        if not hasattr(self, '_set'):
+        if not hasattr(self, "_set"):
             self._set = set()
 
         self._list = SortedList(self._set, key=key)
@@ -261,7 +261,7 @@ class SortedSet(MutableSet, Sequence):
             return NotImplemented
 
         set_op_name = set_op.__name__
-        comparer.__name__ = f'__{set_op_name}__'
+        comparer.__name__ = f"__{set_op_name}__"
         doc_str = """Return true if and only if sorted set is {0} `other`.
 
         ``ss.__{1}__(other)`` <==> ``ss {2} other``
@@ -277,12 +277,12 @@ class SortedSet(MutableSet, Sequence):
         comparer.__doc__ = dedent(doc_str.format(doc, set_op_name, symbol))
         return comparer
 
-    __eq__ = __make_cmp(eq, '==', 'equal to')
-    __ne__ = __make_cmp(ne, '!=', 'not equal to')
-    __lt__ = __make_cmp(lt, '<', 'a proper subset of')
-    __gt__ = __make_cmp(gt, '>', 'a proper superset of')
-    __le__ = __make_cmp(le, '<=', 'a subset of')
-    __ge__ = __make_cmp(ge, '>=', 'a superset of')
+    __eq__ = __make_cmp(eq, "==", "equal to")
+    __ne__ = __make_cmp(ne, "!=", "not equal to")
+    __lt__ = __make_cmp(lt, "<", "a proper subset of")
+    __gt__ = __make_cmp(gt, ">", "a proper superset of")
+    __le__ = __make_cmp(le, "<=", "a subset of")
+    __ge__ = __make_cmp(ge, ">=", "a superset of")
     __make_cmp = staticmethod(__make_cmp)
 
     def __len__(self):
@@ -678,9 +678,9 @@ class SortedSet(MutableSet, Sequence):
 
         """
         _key = self._key
-        key = '' if _key is None else f', key={_key!r}'
+        key = "" if _key is None else f", key={_key!r}"
         type_name = type(self).__name__
-        return f'{type_name}({list(self)!r}{key})'
+        return f"{type_name}({list(self)!r}{key})"
 
     def _check(self):
         """Check invariants of sorted set.

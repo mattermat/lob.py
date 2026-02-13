@@ -1,6 +1,7 @@
 """
 Pytest configuration and common fixtures for lobpy tests.
 """
+
 import sys
 from pathlib import Path
 

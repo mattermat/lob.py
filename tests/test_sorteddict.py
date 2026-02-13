@@ -37,18 +37,18 @@ def test_init_key():
 
 
 def test_init_args():
-    temp = SortedDict([('a', 1), ('b', 2)])
+    temp = SortedDict([("a", 1), ("b", 2)])
     assert len(temp) == 2
-    assert temp['a'] == 1
-    assert temp['b'] == 2
+    assert temp["a"] == 1
+    assert temp["b"] == 2
     temp._check()
 
 
 def test_init_kwargs():
     temp = SortedDict(a=1, b=2)
     assert len(temp) == 2
-    assert temp['a'] == 1
-    assert temp['b'] == 2
+    assert temp["a"] == 1
+    assert temp["b"] == 2
     temp._check()
 
 
@@ -70,7 +70,7 @@ def test_contains():
 def test_delitem():
     mapping = [(val, pos) for pos, val in enumerate(string.ascii_lowercase)]
     temp = SortedDict(mapping)
-    del temp['a']
+    del temp["a"]
     temp._check()
 
 
@@ -86,13 +86,13 @@ def test_eq():
     temp2 = SortedDict(mapping)
     assert temp1 == temp2
     assert not (temp1 != temp2)
-    temp2['a'] = 100
+    temp2["a"] = 100
     assert temp1 != temp2
     assert not (temp1 == temp2)
-    del temp2['a']
+    del temp2["a"]
     assert temp1 != temp2
     assert not (temp1 == temp2)
-    temp2['zz'] = 0
+    temp2["zz"] = 0
     assert temp1 != temp2
     assert not (temp1 == temp2)
 
@@ -112,9 +112,7 @@ def test_iter_key():
 def test_reversed():
     mapping = [(val, pos) for pos, val in enumerate(string.ascii_lowercase)]
     temp = SortedDict(mapping)
-    assert all(
-        lhs == rhs for lhs, rhs in zip(reversed(temp), reversed(string.ascii_lowercase))
-    )
+    assert all(lhs == rhs for lhs, rhs in zip(reversed(temp), reversed(string.ascii_lowercase)))
 
 
 def test_reversed_key():
@@ -131,9 +129,7 @@ def test_islice():
 
     for start in range(30):
         for stop in range(30):
-            assert list(temp.islice(start, stop)) == list(
-                string.ascii_lowercase[start:stop]
-            )
+            assert list(temp.islice(start, stop)) == list(string.ascii_lowercase[start:stop])
 
 
 def test_irange():
@@ -212,8 +208,8 @@ def test_fromkeys():
 def test_get():
     mapping = [(val, pos) for pos, val in enumerate(string.ascii_lowercase)]
     temp = SortedDict(mapping)
-    assert temp.get('a') == 0
-    assert temp.get('A', -1) == -1
+    assert temp.get("a") == 0
+    assert temp.get("A", -1) == -1
 
 
 def test_items():
@@ -241,27 +237,27 @@ def test_iterkeys():
 
 
 def test_notgiven():
-    assert repr(SortedDict._SortedDict__not_given) == '<not-given>'
+    assert repr(SortedDict._SortedDict__not_given) == "<not-given>"
 
 
 def test_pop():
     mapping = [(val, pos) for pos, val in enumerate(string.ascii_lowercase)]
     temp = SortedDict(mapping)
-    assert temp.pop('a') == 0
-    assert temp.pop('a', -1) == -1
+    assert temp.pop("a") == 0
+    assert temp.pop("a", -1) == -1
 
 
 def test_pop2():
     mapping = [(val, pos) for pos, val in enumerate(string.ascii_lowercase)]
     temp = SortedDict(mapping)
     with pytest.raises(KeyError):
-        temp.pop('A')
+        temp.pop("A")
 
 
 def test_popitem():
     mapping = [(val, pos) for pos, val in enumerate(string.ascii_lowercase)]
     temp = SortedDict(mapping)
-    assert temp.popitem() == ('z', 25)
+    assert temp.popitem() == ("z", 25)
 
 
 def test_popitem2():
@@ -273,15 +269,15 @@ def test_popitem2():
 def test_popitem3():
     mapping = [(val, pos) for pos, val in enumerate(string.ascii_lowercase)]
     temp = SortedDict(mapping)
-    assert temp.popitem(index=0) == ('a', 0)
+    assert temp.popitem(index=0) == ("a", 0)
 
 
 def test_peekitem():
     mapping = [(val, pos) for pos, val in enumerate(string.ascii_lowercase)]
     temp = SortedDict(mapping)
-    assert temp.peekitem() == ('z', 25)
-    assert temp.peekitem(0) == ('a', 0)
-    assert temp.peekitem(index=4) == ('e', 4)
+    assert temp.peekitem() == ("z", 25)
+    assert temp.peekitem(0) == ("a", 0)
+    assert temp.peekitem(index=4) == ("e", 4)
 
 
 def test_peekitem2():
@@ -294,9 +290,9 @@ def test_peekitem2():
 def test_setdefault():
     mapping = [(val, pos) for pos, val in enumerate(string.ascii_lowercase)]
     temp = SortedDict(mapping)
-    assert temp.setdefault('a', -1) == 0
-    assert temp['a'] == 0
-    assert temp.setdefault('A', -1) == -1
+    assert temp.setdefault("a", -1) == 0
+    assert temp["a"] == 0
+    assert temp.setdefault("A", -1) == -1
 
 
 def test_update():
@@ -317,7 +313,7 @@ def test_update2():
 
 
 def test_repr():
-    temp = SortedDict({'alice': 3, 'bob': 1, 'carol': 2, 'dave': 4})
+    temp = SortedDict({"alice": 3, "bob": 1, "carol": 2, "dave": 4})
     assert repr(temp) == "SortedDict({'alice': 3, 'bob': 1, 'carol': 2, 'dave': 4})"
 
 
@@ -326,48 +322,43 @@ class Identity:
         return value
 
     def __repr__(self):
-        return 'identity'
+        return "identity"
 
 
 def test_repr_recursion():
-    temp = SortedDict(Identity(), {'alice': 3, 'bob': 1, 'carol': 2, 'dave': 4})
-    temp['bob'] = temp
-    assert (
-        repr(temp)
-        == "SortedDict(identity, {'alice': 3, 'bob': ..., 'carol': 2, 'dave': 4})"
-    )
+    temp = SortedDict(Identity(), {"alice": 3, "bob": 1, "carol": 2, "dave": 4})
+    temp["bob"] = temp
+    assert repr(temp) == "SortedDict(identity, {'alice': 3, 'bob': ..., 'carol': 2, 'dave': 4})"
 
 
 def test_repr_subclass():
     class CustomSortedDict(SortedDict):
         pass
 
-    temp = CustomSortedDict({'alice': 3, 'bob': 1, 'carol': 2, 'dave': 4})
-    assert (
-        repr(temp) == "CustomSortedDict({'alice': 3, 'bob': 1, 'carol': 2, 'dave': 4})"
-    )
+    temp = CustomSortedDict({"alice": 3, "bob": 1, "carol": 2, "dave": 4})
+    assert repr(temp) == "CustomSortedDict({'alice': 3, 'bob': 1, 'carol': 2, 'dave': 4})"
 
 
 def test_index():
     mapping = [(val, pos) for pos, val in enumerate(string.ascii_lowercase)]
     temp = SortedDict(mapping)
-    assert temp.index('a') == 0
-    assert temp.index('f', 3, -3) == 5
+    assert temp.index("a") == 0
+    assert temp.index("f", 3, -3) == 5
 
 
 def test_iloc():
     with warnings.catch_warnings():
-        warnings.simplefilter('ignore', category=DeprecationWarning)
+        warnings.simplefilter("ignore", category=DeprecationWarning)
         mapping = [(val, pos) for pos, val in enumerate(string.ascii_lowercase)]
         temp = SortedDict(mapping)
         assert len(temp.iloc) == 26
-        assert temp.iloc[0] == 'a'
-        assert temp.iloc[-1] == 'z'
-        assert temp.iloc[-3:] == ['x', 'y', 'z']
+        assert temp.iloc[0] == "a"
+        assert temp.iloc[-1] == "z"
+        assert temp.iloc[-3:] == ["x", "y", "z"]
         del temp.iloc[0]
-        assert temp.iloc[0] == 'b'
+        assert temp.iloc[0] == "b"
         del temp.iloc[-3:]
-        assert temp.iloc[-1] == 'w'
+        assert temp.iloc[-1] == "w"
 
 
 def test_index_key():
@@ -379,9 +370,9 @@ def test_index_key():
 def test_bisect():
     mapping = [(val, pos) for pos, val in enumerate(string.ascii_lowercase)]
     temp = SortedDict(mapping)
-    assert temp.bisect_left('a') == 0
-    assert temp.bisect_right('f') == 6
-    assert temp.bisect('f') == 6
+    assert temp.bisect_left("a") == 0
+    assert temp.bisect_right("f") == 6
+    assert temp.bisect("f") == 6
 
 
 def test_bisect_key():
@@ -406,19 +397,19 @@ def test_keysview():
     keys = temp.keys()
 
     assert len(keys) == 13
-    assert 'a' in keys
+    assert "a" in keys
     assert list(keys) == [val for val, pos in mapping[:13]]
-    assert keys[0] == 'a'
+    assert keys[0] == "a"
     assert list(reversed(keys)) == list(reversed(string.ascii_lowercase[:13]))
-    assert keys.index('f') == 5
-    assert keys.count('m') == 1
-    assert keys.count('0') == 0
-    assert keys.isdisjoint(['1', '2', '3'])
+    assert keys.index("f") == 5
+    assert keys.count("m") == 1
+    assert keys.count("0") == 0
+    assert keys.isdisjoint(["1", "2", "3"])
 
     temp.update(mapping[13:])
 
     assert len(keys) == 26
-    assert 'z' in keys
+    assert "z" in keys
     assert list(keys) == [val for val, pos in mapping]
 
     that = dict(mapping)
@@ -479,20 +470,20 @@ def test_itemsview():
     items = temp.items()
 
     assert len(items) == 13
-    assert ('a', 0) in items
+    assert ("a", 0) in items
     assert list(items) == mapping[:13]
-    assert items[0] == ('a', 0)
-    assert items[-3:] == [('k', 10), ('l', 11), ('m', 12)]
+    assert items[0] == ("a", 0)
+    assert items[-3:] == [("k", 10), ("l", 11), ("m", 12)]
     assert list(reversed(items)) == list(reversed(mapping[:13]))
-    assert items.index(('f', 5)) == 5
-    assert items.count(('m', 12)) == 1
-    assert items.isdisjoint([('0', 26), ('1', 27)])
-    assert not items.isdisjoint([('a', 0), ('b', 1)])
+    assert items.index(("f", 5)) == 5
+    assert items.count(("m", 12)) == 1
+    assert items.isdisjoint([("0", 26), ("1", 27)])
+    assert not items.isdisjoint([("a", 0), ("b", 1)])
 
     temp.update(mapping[13:])
 
     assert len(items) == 26
-    assert ('z', 25) in items
+    assert ("z", 25) in items
     assert list(items) == mapping
 
     that = dict(mapping)
@@ -519,7 +510,7 @@ def test_items_view_index():
     temp = SortedDict(mapping[:13])
     items = temp.items()
     with pytest.raises(ValueError):
-        items.index(('f', 100))
+        items.index(("f", 100))
 
 
 def test_pickle():
@@ -532,7 +523,7 @@ def test_pickle():
     assert alpha._key == beta._key
 
 
-if platform.python_implementation() == 'CPython':
+if platform.python_implementation() == "CPython":
 
     def test_ref_counts():
         start_count = len(gc.get_objects())

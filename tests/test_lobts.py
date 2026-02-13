@@ -4,6 +4,7 @@ from lobpy.lobts import LOBts
 try:
     import numpy as np
     import pandas as pd
+
     HAS_NUMPY = True
     HAS_PANDAS = True
 except ImportError:
@@ -73,7 +74,7 @@ class TestLOBtsBasicMethods:
     def test_set_updates_creates_new_lob(self):
         """Test that set_updates creates new LOB in series."""
         lobts = LOBts()
-        updates = [('b', 100, 10), ('a', 101, 8)]
+        updates = [("b", 100, 10), ("a", 101, 8)]
 
         lobts.set_updates(updates, timestamp=1000)
 
@@ -87,7 +88,7 @@ class TestLOBtsBasicMethods:
         """Test set_updates with explicit timestamp."""
         lobts = LOBts()
         timestamp = 1234567890
-        updates = [('b', 100, 10)]
+        updates = [("b", 100, 10)]
 
         lobts.set_updates(updates, timestamp=timestamp)
 
@@ -98,12 +99,7 @@ class TestLOBtsBasicMethods:
     def test_set_updates_multiple_levels(self):
         """Test set_updates with multiple level changes."""
         lobts = LOBts()
-        updates = [
-            ('b', 100, 10),
-            ('b', 99, 5),
-            ('a', 101, 8),
-            ('a', 102, 4)
-        ]
+        updates = [("b", 100, 10), ("b", 99, 5), ("a", 101, 8), ("a", 102, 4)]
 
         lobts.set_updates(updates, timestamp=1000)
 
@@ -118,7 +114,7 @@ class TestLOBtsBasicMethods:
         """Test that single update creates new LOB."""
         lobts = LOBts()
 
-        lobts.set_updates([('b', 100, 10)], timestamp=1000)
+        lobts.set_updates([("b", 100, 10)], timestamp=1000)
 
         assert lobts.len == 1
         lob = lobts[1000]
@@ -130,7 +126,7 @@ class TestLOBtsBasicMethods:
         lobts = LOBts()
 
         lobts.set_snapshot([(100, 10)], [(101, 8)], timestamp=1000)
-        lobts.set_updates([('b', 100, 0)], timestamp=2000)
+        lobts.set_updates([("b", 100, 0)], timestamp=2000)
 
         lob = lobts[2000]
         assert lob is not None
@@ -406,19 +402,18 @@ class TestLOBtsTimeStats:
         lobts = LOBts(tick_size=0.01)
 
         # Initial state
-        lobts.set_snapshot(
-            bids=[(100.00, 10), (99.50, 5)],
-            asks=[(100.50, 8)],
-            timestamp=1000
-        )
+        lobts.set_snapshot(bids=[(100.00, 10), (99.50, 5)], asks=[(100.50, 8)], timestamp=1000)
 
         # New levels + quantity increases
-        lobts.set_updates([
-            ('b', 100.00, 15),    # QUANTITY INCREASE: 10 -> 15 (+5)
-            ('b', 98.50, 3),      # NEW LEVEL: 3 (+3)
-            ('a', 100.50, 10),    # QUANTITY INCREASE: 8 -> 10 (+2)
-            ('a', 102.00, 2),     # NEW LEVEL: 2 (+2)
-        ], timestamp=1100)
+        lobts.set_updates(
+            [
+                ("b", 100.00, 15),  # QUANTITY INCREASE: 10 -> 15 (+5)
+                ("b", 98.50, 3),  # NEW LEVEL: 3 (+3)
+                ("a", 100.50, 10),  # QUANTITY INCREASE: 8 -> 10 (+2)
+                ("a", 102.00, 2),  # NEW LEVEL: 2 (+2)
+            ],
+            timestamp=1100,
+        )
 
         # Total arrivals: 5 + 3 + 2 + 2 = 12
         assert lobts.arrival_frequency == 12
@@ -448,7 +443,7 @@ class TestLOBtsTimeStats:
         lobts = LOBts()
 
         lobts.set_snapshot([(100, 10)], [(101, 8)], timestamp=1000)
-        lobts.set_updates([('b', 100, 0)], timestamp=1100)
+        lobts.set_updates([("b", 100, 0)], timestamp=1100)
 
         freq = lobts.cancel_frequency
         assert freq is not None
@@ -459,8 +454,8 @@ class TestLOBtsTimeStats:
         lobts = LOBts()
 
         lobts.set_snapshot([(100, 10)], [(101, 8)], timestamp=1000)
-        lobts.set_updates([('b', 100, 0)], timestamp=1100)
-        lobts.set_updates([('b', 99, 0)], timestamp=1200)
+        lobts.set_updates([("b", 100, 0)], timestamp=1100)
+        lobts.set_updates([("b", 99, 0)], timestamp=1200)
 
         freq = lobts.cancel_frequency
         assert freq is not None
@@ -471,23 +466,27 @@ class TestLOBtsTimeStats:
 
         # Initial state
         lobts.set_snapshot(
-            bids=[(100.00, 10), (99.50, 5)],
-            asks=[(100.50, 8), (101.00, 4)],
-            timestamp=1000
+            bids=[(100.00, 10), (99.50, 5)], asks=[(100.50, 8), (101.00, 4)], timestamp=1000
         )
 
         # Partial cancel + full cancel + arrival
-        lobts.set_updates([
-            ('b', 100.00, 7),     # PARTIAL: 10 -> 7 (decrease of 3)
-            ('b', 99.50, 0),      # FULL: 5 -> 0 (decrease of 5)
-            ('a', 100.50, 5),      # PARTIAL: 8 -> 5 (decrease of 3)
-            ('b', 98.50, 3),      # ARRIVAL: new level
-        ], timestamp=1100)
+        lobts.set_updates(
+            [
+                ("b", 100.00, 7),  # PARTIAL: 10 -> 7 (decrease of 3)
+                ("b", 99.50, 0),  # FULL: 5 -> 0 (decrease of 5)
+                ("a", 100.50, 5),  # PARTIAL: 8 -> 5 (decrease of 3)
+                ("b", 98.50, 3),  # ARRIVAL: new level
+            ],
+            timestamp=1100,
+        )
 
         # More cancels
-        lobts.set_updates([
-            ('b', 98.50, 0),      # FULL: 3 -> 0 (decrease of 3)
-        ], timestamp=1200)
+        lobts.set_updates(
+            [
+                ("b", 98.50, 0),  # FULL: 3 -> 0 (decrease of 3)
+            ],
+            timestamp=1200,
+        )
 
         # Total cancels: 3+5+3 (t=1100) + 3 (t=1200) = 14
         assert lobts.cancel_frequency == 14
@@ -598,7 +597,7 @@ class TestLOBtsUtils:
         lobts.set_snapshot([(100, 10), (99, 5)], [(101, 8), (102, 4)], timestamp=1000)
 
         lob = lobts[1000]
-        tick_dist = lob.len_in_tick('bid', 99)
+        tick_dist = lob.len_in_tick("bid", 99)
         assert tick_dist is not None
         assert tick_dist == 100
 
@@ -609,7 +608,7 @@ class TestLOBtsUtils:
         lobts.set_snapshot([(100, 10), (99, 5), (98, 3)], [(101, 8)], timestamp=1000)
 
         lob = lobts[1000]
-        agg = lob.aggq('bid', nlevel=2)
+        agg = lob.aggq("bid", nlevel=2)
         assert agg == 15
 
     def test_aggq_ticks(self):
@@ -619,7 +618,7 @@ class TestLOBtsUtils:
         lobts.set_snapshot([(100, 10), (99, 5), (98, 3)], [(101, 8)], timestamp=1000)
 
         lob = lobts[1000]
-        agg = lob.aggq('bid', ticks=2)
+        agg = lob.aggq("bid", ticks=2)
         assert agg is not None
 
     def test_aggq_price(self):
@@ -629,7 +628,7 @@ class TestLOBtsUtils:
         lobts.set_snapshot([(100, 10), (99, 5), (98, 3)], [(101, 8)], timestamp=1000)
 
         lob = lobts[1000]
-        agg = lob.aggq('bid', price=99)
+        agg = lob.aggq("bid", price=99)
         assert agg is not None
 
     def test_get_slippage(self):
@@ -639,7 +638,7 @@ class TestLOBtsUtils:
         lobts.set_snapshot([(100, 10), (99, 5)], [(101, 8), (102, 4)], timestamp=1000)
 
         lob = lobts[1000]
-        slippage = lob.get_slippage(5, side='ask')
+        slippage = lob.get_slippage(5, side="ask")
         assert slippage is not None
 
 
