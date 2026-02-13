@@ -3,8 +3,8 @@ from lobpy import LOB
 lob = LOB(tick_size=0.1)
 
 lob.set_snapshot(
-    [(99.8, 10), (99.7, 20), (99.2, 30)],
-    [(100.1, 15), (101.0, 25)]
+    bids=[(99.8, 10), (99.7, 20), (99.2, 30)],
+    asks=[(100.1, 15), (101.0, 25)]
 )
 print(lob.to_np())
 print(lob.check())
@@ -29,6 +29,10 @@ print(lob.spread_rel)
 print(lob.midprice)
 print(lob.vw_midprice)
 
+lob.aggq('ask', nlevel=3)
+lob.aggq('bid', ticks=5)
+lob.aggq('bid', price=99.7)
+
 #lob.to_xlsx('lob.xlsx')
 
 print()
@@ -43,12 +47,17 @@ lob.set_updates([
 print(lob.to_np())
 print(lob.check())
 
-# TODO: change the arguments of `get_delta`
-print(
-    lob.get_delta(bids=[
-        ('bid', 99.7, 0),
-        ('bid', 101.5, 10)],
-        asks=[('ask', 100.1, 10),
-        ('ask', 101.0, 0),
-        ('ask', 102.0, 10)])
+print()
+# comparison between two LOBs
+base_book = LOB(
+    tick_size=0.1,
+    bids=[(99.8, 10), (99.7, 20), (99.2, 30)],
+    asks=[(100.1, 15), (101.0, 25)]
 )
+comp_book = LOB(
+    tick_size=0.1,
+    bids=[(99.7, 20), (99.2, 30)],
+    asks=[(99.9, 15), (101.0, 25)]
+)
+# comparison
+print(base_book.diff(comp_book)) # should return [('bid', 99.8, 0), ('ask', 99.9, 15), ('ask', 100.1, 0)]

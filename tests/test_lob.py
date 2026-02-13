@@ -43,6 +43,67 @@ class TestLOBTickSize:
         assert lob.tick_size == 0.1
 
 
+class TestLOBSetUpdates:
+    """Test set_updates functionality."""
+    
+    def test_set_updates_with_long_form(self):
+        """Test set_updates with long form side parameters ('bid', 'ask')."""
+        lob = LOB()
+        lob.set_updates([('bid', 100, 10), ('bid', 99, 5), ('ask', 101, 8), ('ask', 102, 4)])
+        
+        assert len(lob._bids) == 2
+        assert len(lob._asks) == 2
+        assert lob._bids[100] == 10
+        assert lob._bids[99] == 5
+        assert lob._asks[101] == 8
+        assert lob._asks[102] == 4
+    
+    def test_set_updates_with_short_form(self):
+        """Test set_updates with short form side parameters ('b', 'a')."""
+        lob = LOB()
+        lob.set_updates([('b', 100, 10), ('b', 99, 5), ('a', 101, 8), ('a', 102, 4)])
+        
+        assert len(lob._bids) == 2
+        assert len(lob._asks) == 2
+        assert lob._bids[100] == 10
+        assert lob._bids[99] == 5
+        assert lob._asks[101] == 8
+        assert lob._asks[102] == 4
+    
+    def test_set_updates_mixed_forms(self):
+        """Test set_updates with mixed short and long form side parameters."""
+        lob = LOB()
+        lob.set_updates([('bid', 100, 10), ('b', 99, 5), ('ask', 101, 8), ('a', 102, 4)])
+        
+        assert len(lob._bids) == 2
+        assert len(lob._asks) == 2
+        assert lob._bids[100] == 10
+        assert lob._bids[99] == 5
+        assert lob._asks[101] == 8
+        assert lob._asks[102] == 4
+    
+    def test_set_updates_delete_levels(self):
+        """Test set_updates deleting levels with short form."""
+        lob = LOB()
+        lob.set_snapshot([(100, 10), (99, 5)], [(101, 8), (102, 4)])
+        
+        # Delete level with zero size using short form
+        lob.set_updates([('b', 100, 0), ('a', 101, 0)])
+        
+        assert 100 not in lob._bids
+        assert 101 not in lob._asks
+        assert 99 in lob._bids
+        assert 102 in lob._asks
+    
+    def test_set_updates_with_timestamp(self):
+        """Test set_updates with timestamp using short form."""
+        lob = LOB()
+        timestamp = 1234567890
+        lob.set_updates([('b', 100, 10), ('a', 101, 8)], timestamp=timestamp)
+        
+        assert lob.timestamp == timestamp
+
+
 class TestLOBSnapshot:
     """Test snapshot functionality."""
     
@@ -244,6 +305,20 @@ class TestLOBUpdate:
         assert 100 not in lob._bids
         assert 101 not in lob._asks
     
+    def test_update_with_short_form_bid(self):
+        """Test update method with side='b' (short form for bid)."""
+        lob = LOB()
+        lob.update("b", 100, 10)
+        
+        assert lob._bids[100] == 10
+    
+    def test_update_with_short_form_ask(self):
+        """Test update method with side='a' (short form for ask)."""
+        lob = LOB()
+        lob.update("a", 101, 8)
+        
+        assert lob._asks[101] == 8
+    
 
 class TestLOBProperties:
     """Test LoB properties."""
@@ -280,16 +355,13 @@ class TestLOBProperties:
         lob.set_snapshot([(100, 10)], [])
         import math
         assert math.isnan(lob.spread)
-     
-        assert lob.spread == 1.0
-    
+      
     def test_spread_property_empty(self):
         """Test spread returns nan when empty."""
         lob = LOB()
         import math
         assert math.isnan(lob.spread)
-    
-    def test_spread_property_one_side(self):
+     
     def test_spread_property_one_side(self):
         """Test spread when only one side has orders."""
         lob = LOB()
@@ -416,14 +488,14 @@ class TestLOBBestPriceOrdering:
     def test_best_ask_is_lowest(self):
         """Test that best ask is the lowest price."""
         lob = LOB()
-        lob.set_snapshot([(103, 2), (101, 8), (102, 4)], [])
+        lob.set_snapshot([], [(103, 2), (101, 8), (102, 4)])
         
         assert lob.ask == 101
-        # ask[0] should equal ask
-        assert lob._asks.peekitem(0) == (101, 8)
-        # ask[1] should be second best ask
-        assert lob._asks.peekitem(1) == (102, 4)
-        # ask[2] should be third best ask
+        # ask[0] should equal ask (price only)
+        assert lob.ask[0] == 101
+        # ask[1] should be second best ask (price only)
+        assert lob.ask[1] == 102
+        # ask[2] should be third best ask (price only)
         assert lob._asks.peekitem(2) == (103, 2)
     
     def test_bid_ask_sizes_with_floats(self):
@@ -432,9 +504,9 @@ class TestLOBBestPriceOrdering:
         lob.set_snapshot([(100, 10.5)], [(101, 8.75)])
         
         # bidq should be best bid size (float)
-        assert lob.bid[1] == 10.5
+        assert lob.bidq == 10.5
         # askq should be best ask size (float)
-        assert lob.ask[1] == 8.75
+        assert lob.askq == 8.75
 
 
 class TestLOBSpreadProperties:
@@ -472,6 +544,154 @@ class TestLOBSpreadProperties:
         # Note: This property doesn't exist yet in LOB class
         # Just documenting what should be tested once implemented
         
+
+class TestLOBAggq:
+    """Test LOB.aggq() method for aggregating order book quantities."""
+    
+    def test_aggq_ask_nlevels(self):
+        """Test aggq for asks with nlevel parameter."""
+        lob = LOB()
+        lob.set_snapshot([], [(101, 8), (102, 4), (103, 2), (104, 6)])
+        
+        # Sum top 3 ask levels: 8 + 4 + 2 = 14
+        assert lob.aggq('ask', nlevel=3) == 14
+    
+    def test_aggq_bid_nlevels(self):
+        """Test aggq for bids with nlevel parameter."""
+        lob = LOB()
+        lob.set_snapshot([(100, 10), (99, 5), (98, 3), (97, 2)], [])
+        
+        # Sum top 3 bid levels: 10 + 5 + 3 = 18
+        assert lob.aggq('bid', nlevel=3) == 18
+    
+    def test_aggq_bid_with_floats(self):
+        """Test aggq for bids with float prices and sizes."""
+        lob = LOB()
+        lob.set_snapshot([(100.5, 10.25), (99.75, 5.5), (98.5, 3.75)], [])
+        
+        # Sum all bid levels: 10.25 + 5.5 + 3.75 = 19.5
+        assert lob.aggq('bid', nlevel=3) == 19.5
+    
+    def test_aggq_ask_empty(self):
+        """Test aggq for asks when no asks."""
+        lob = LOB()
+        lob.set_snapshot([(100, 10)], [])
+        
+         # assert lob.aggq('ask', nlevel=10) == 0.0
+        assert lob.aggq('ask', nlevel=10) == 0.0
+        assert lob.aggq('bid', nlevel=10) == 10.0
+
+    def test_aggq_bid_empty(self):
+        """Test aggq for bids when no bids."""
+        lob = LOB()
+        lob.set_snapshot([], [(101, 8)])
+        
+    
+    def test_aggq_ask_one_level(self):
+        """Test aggq for asks with nlevel=1."""
+        lob = LOB()
+        lob.set_snapshot([], [(101, 8), (102, 4), (103, 2)])
+        
+        # Sum top 1 ask level: 8
+        assert lob.aggq('ask', nlevel=1) == 8
+    
+    def test_aggq_bid_one_level(self):
+        """Test aggq for bids with nlevel=1."""
+        lob = LOB()
+        lob.set_snapshot([(100, 10), (99, 5), (98, 3)], [])
+        
+        # Sum top 1 bid level: 10
+        assert lob.aggq('bid', nlevel=1) == 10
+    
+    def test_aggq_ask_nlevel_zero(self):
+        """Test aggq for asks with nlevel=0."""
+        lob = LOB()
+        lob.set_snapshot([], [(101, 8), (102, 4), (103, 2)])
+        
+        assert lob.aggq('ask', nlevel=0) == 0.0
+    
+    def test_aggq_bid_nlevel_zero(self):
+        """Test aggq for bids with nlevel=0."""
+        lob = LOB()
+        lob.set_snapshot([(100, 10), (99, 5), (98, 3)], [])
+        
+        assert lob.aggq('bid', nlevel=0) == 0.0
+    
+    def test_aggq_ask_nlevel_exceeds_levels(self):
+        """Test aggq for asks when nlevel > available levels."""
+        lob = LOB()
+        lob.set_snapshot([], [(101, 8), (102, 4)])
+        
+        # nlevel=5 but only 2 levels exist, sum all: 8 + 4 = 12
+        assert lob.aggq('ask', nlevel=5) == 12
+    
+    def test_aggq_bid_nlevel_exceeds_levels(self):
+        """Test aggq for bids when nlevel > available levels."""
+        lob = LOB()
+        lob.set_snapshot([(100, 10), (99, 5)], [])
+        
+        assert lob.aggq('bid', nlevel=10) == 15
+    
+    def test_aggq_ask_large_ticks(self):
+        """Test aggq for asks with ticks parameter that includes all levels."""
+        lob = LOB()
+        lob._set_tick_size(0.5)
+        lob.set_snapshot([], [(101, 8), (101.5, 4), (102, 2)])
+        
+        # Sum all asks (within large tick count): 8 + 4 + 2 = 14
+        assert lob.aggq('ask', ticks=100) == 14
+    
+    def test_aggq_bid_ticks_boundary(self):
+        """Test aggq for bids with ticks at boundary."""
+        lob = LOB()
+        lob._set_tick_size(1.0)
+        lob.set_snapshot([(100, 10), (99, 5), (98, 3), (97, 2)], [])
+        
+        # Within 2 ticks from top (100, 99): 10 + 5 = 15
+        # 98 is at 100 - 2 = 98, which is exactly 2 ticks away, so included
+        assert lob.aggq('bid', ticks=2) == 10 + 5 + 3 == 18
+    
+    def test_aggq_price_boundary(self):
+        """Test aggq for asks with price at boundary."""
+        lob = LOB()
+        lob.set_snapshot([], [(105, 8), (103, 4), (102, 2), (101, 6)])
+        
+        # At price <= 103.5: 6 + 2 + 4 = 12
+        assert lob.aggq('ask', price=103.5) == 12
+        # At price <= 103 is the same
+        assert lob.aggq('ask', price=103) == 12
+    
+    def test_aggq_with_short_form(self):
+        """Test aggq with short form side parameters ('b', 'a')."""
+        lob = LOB()
+        lob.set_snapshot([(100, 10), (99, 5), (98, 3), (97, 2)], [(101, 8), (102, 4), (103, 2), (104, 6)])
+        
+        # Test with short form 'b' for bids
+        assert lob.aggq('b', nlevel=3) == 18
+        # Test with short form 'a' for asks
+        assert lob.aggq('a', nlevel=3) == 14
+    
+    def test_aggq_short_form_with_ticks(self):
+        """Test aggq with short form and ticks parameter."""
+        lob = LOB()
+        lob._set_tick_size(1.0)
+        lob.set_snapshot([(100, 10), (99, 5), (98, 3), (97, 2)], [(101, 8), (102, 4), (103, 2), (104, 6)])
+        
+        # Test with short form 'b' and ticks
+        assert lob.aggq('b', ticks=2) == 18
+        # Test with short form 'a' and ticks
+        assert lob.aggq('a', ticks=2) == 14
+    
+    def test_aggq_short_form_with_price(self):
+        """Test aggq with short form and price parameter."""
+        lob = LOB()
+        lob.set_snapshot([(100, 10), (99, 5), (98, 3), (97, 2)], [(105, 8), (103, 4), (102, 2), (101, 6)])
+        
+        # Test with short form 'b' and price
+        assert lob.aggq('b', price=98) == 10 + 5 + 3
+        # Test with short form 'a' and price
+        assert lob.aggq('a', price=103) == 6 + 2 + 4
+    
 
 class TestLOBToNumpy:
 

@@ -5,6 +5,13 @@ Example showing LOBts (Time Series LOB) usage.
 from lobpy import LOBts
 import time
 
+# array of timestamps in microseconds
+times = [
+    1770990337346989262321,
+    1770990337346989262322,
+    1770990337346989262323
+]
+
 # Create a time-series LOB
 lobts = LOBts(name="BTC-USD", tick_size=0.01, mode='history')
 

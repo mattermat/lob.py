@@ -5,6 +5,15 @@ from .sorteddict import SortedDict
 def neg(x: int) -> int:
     return -x
 
+def _normalize_side(side: str) -> str:
+    """Normalize side parameter to long form ('bid' or 'ask')."""
+    if side in ('b', 'bid'):
+        return 'bid'
+    elif side in ('a', 'ask'):
+        return 'ask'
+    else:
+        return side
+
 class PriceAccessor:
     def __init__(self, data):
         self._data = data
@@ -115,7 +124,7 @@ class LOB():
         
         Args:
             updates: List of (side, price, size) tuples where:
-                - side: 'bid' or 'ask'
+                - side: 'b' or 'bid' for bids, 'a' or 'ask' for asks
                 - price: price level
                 - size: quantity (0 to delete level)
             timestamp: Optional timestamp for the updates
@@ -127,6 +136,7 @@ class LOB():
         save_asks = dict(self._asks)
         
         for side, price, size in updates:
+            side = _normalize_side(side)
             if side == 'bid':
                 if size == 0:
                     save_bids.pop(price, None)
@@ -152,6 +162,7 @@ class LOB():
         if timestamp != 0:
             self.timestamp = timestamp
 
+        side = _normalize_side(side)
         if side == "bid":
             try:
                 del self._bids[price_level]
@@ -193,6 +204,7 @@ class LOB():
             self._delete_level(side, price_level, timestamp)
             return
 
+        side = _normalize_side(side)
         if side == "bid":
             try:
                 self._bids[price_level] = size
@@ -530,7 +542,7 @@ class LOB():
 
         Args:
             volume: volume to execute
-            side: 'midprice', 'ask', or 'bid'
+            side: 'midprice', 'a'/'ask', or 'b'/'bid'
 
         Returns:
             slippage in price units
@@ -540,7 +552,9 @@ class LOB():
 
         if side == 'midprice':
             return 0.0
-        elif side == 'ask':
+        
+        side = _normalize_side(side)
+        if side == 'ask':
             remaining = volume
             total_cost = 0.0
             ask_items = list(self._asks.items())
@@ -569,19 +583,20 @@ class LOB():
             avg_price = total_cost / volume
             return self.midprice - avg_price
         else:
-            raise ValueError(f"Invalid side: {side}. Must be 'midprice', 'ask', or 'bid'.")
+            raise ValueError(f"Invalid side: {side}. Must be 'midprice', 'a'/'ask', or 'b'/'bid'.")
 
     def len_in_tick(self, side, price):
         """
         Return the number of ticks the provided price is far from the top of the book.
 
         Args:
-            side: 'bid' or 'ask'
+            side: 'b' or 'bid' for bids, 'a' or 'ask' for asks
             price: price level to check
 
         Returns:
             number of ticks from the top level
         """
+        side = _normalize_side(side)
         if side == 'bid':
             best_price = self.bid[0]
             if best_price <= 0:
@@ -593,7 +608,7 @@ class LOB():
                 return float('inf')
             return int(round((price - best_price) / self.tick_size))
         else:
-            raise ValueError(f"Invalid side: {side}. Must be 'bid' or 'ask'.")
+            raise ValueError(f"Invalid side: {side}. Must be 'b'/'bid' or 'a'/'ask'.")
 
     def diff(self, other):
         """
@@ -629,6 +644,58 @@ class LOB():
                 updates.append(('ask', price, 0))
         
         return updates
+
+    def aggq(self, side, nlevel=None, ticks=None, price=None):
+        """
+        Aggregate order book quantities based on the specified criteria.
+
+        Args:
+            side: 'b' or 'bid' for bids, 'a' or 'ask' for asks - which side of the order book to aggregate
+            nlevel: number of top levels to aggregate (e.g., nlevel=3 for top 3 levels)
+            ticks: tick distance from the best price to aggregate
+            price: price level to aggregate at or beyond
+
+        Returns:
+            Total aggregated quantity for the specified criteria
+
+        Raises:
+            ValueError: if side is invalid or no aggregation criterion is specified
+        """
+        side = _normalize_side(side)
+        if side not in ('bid', 'ask'):
+            raise ValueError(f"Invalid side: {side}. Must be 'b'/'bid' or 'a'/'ask'.")
+
+        data = self._bids if side == 'bid' else self._asks
+        items = list(data.items())
+
+        if not items:
+            return 0.0
+
+        if nlevel is not None:
+            levels = items[:nlevel]
+            return sum(size for _, size in levels)
+        elif ticks is not None:
+            if side == 'bid':
+                best_price = items[0][0]
+                if best_price <= 0:
+                    return 0.0
+                min_price = best_price - ticks * self.tick_size
+                levels = [(p, s) for p, s in items if p >= min_price]
+            else:
+                best_price = items[0][0]
+                if best_price <= 0:
+                    return 0.0
+                max_price = best_price + ticks * self.tick_size
+                levels = [(p, s) for p, s in items if p <= max_price]
+            return sum(size for _, size in levels)
+        elif price is not None:
+            if side == 'bid':
+                levels = [(p, s) for p, s in items if p >= price]
+            else:
+                levels = [(p, s) for p, s in items if p <= price]
+            return sum(size for _, size in levels)
+        else:
+            raise ValueError("Must specify one of: nlevel, ticks, or price")
 
     def __repr__(self) -> str:
         return f"<Book[{self.name}]>"
