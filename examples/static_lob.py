@@ -60,4 +60,6 @@ comp_book = LOB(
     asks=[(99.9, 15), (101.0, 25)]
 )
 # comparison
-print(base_book.diff(comp_book)) # should return [('bid', 99.8, 0), ('ask', 99.9, 15), ('ask', 100.1, 0)]
+print(base_book.diff(comp_book))  # noqa: E501
+# should return
+# [('bid', 99.8, 0), ('ask', 99.9, 15), ('ask', 100.1, 0)]

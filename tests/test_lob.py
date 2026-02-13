@@ -362,13 +362,6 @@ class TestLOBProperties:
         import math
         assert math.isnan(lob.spread)
 
-    def test_spread_property_one_side(self):
-        """Test spread when only one side has orders."""
-        lob = LOB()
-        lob.set_snapshot([(100, 10)], [])
-        import math
-        assert math.isnan(lob.spread)
-
 class TestLOBGetDelta:
     """Test get_delta functionality."""
 

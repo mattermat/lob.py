@@ -122,14 +122,14 @@ class LOB():
     def set_updates(self, updates, timestamp=0):
         """
         Push multiple updates to the order book at once.
-        
+
         Args:
             updates: List of (side, price, size) tuples where:
                 - side: 'b' or 'bid' for bids, 'a' or 'ask' for asks
                 - price: price level
                 - size: quantity (0 to delete level)
             timestamp: Optional timestamp for the updates
-        
+
         Note:
             Updates are applied atomically - all or nothing.
         """
@@ -456,8 +456,17 @@ class LOB():
         Returns:
             DataFrame with columns ['price', 'size'] when side specified
             DataFrame with columns ['price', 'size', 'side'] when side=None
+
+        Raises:
+            ImportError: If pandas is not installed
         """
-        import pandas as pd
+        try:
+            import pandas as pd
+        except ImportError as e:
+            raise ImportError(
+                "pandas is required for to_pd() method. "
+                "Install it with: pip install pandas[export]"
+            ) from e
 
         if side == 'b':
             levels = _get_levels(self._bids, nlevels)

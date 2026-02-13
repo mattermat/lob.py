@@ -357,7 +357,10 @@ class LOBts:
                 import math
                 vw_midprices.append(math.nan)
             else:
-                vw_midprices.append((bid_price * bid_size + ask_price * ask_size) / (bid_size + ask_size))
+                vw_midprices.append(
+                    (bid_price * bid_size + ask_price * ask_size)
+                    / (bid_size + ask_size)
+                )
             timestamps.append(ts)
 
         return pd.Series(vw_midprices, index=timestamps, name='vw_midprice')
@@ -436,11 +439,6 @@ class LOBts:
 
         Returns total quantity removed (negative changes) across all transitions.
         """
-        try:
-            import pandas as pd
-        except ImportError:
-            raise ImportError("pandas is required for frequency methods")
-
         timestamps_list = list(self._lobs.keys())
         if len(timestamps_list) <= 1:
             return 0

@@ -63,6 +63,12 @@ line-length = 100
 lint.select = ["E", "F", "I", "N", "W"]
 target-version = "py38"
 
+[tool.ruff.lint.per-file-ignores]
+"lobpy/sortedlist.py" = ["N805"]
+"lobpy/sortedset.py" = ["N805"]
+"tests/test_lob.py" = ["F401"]
+"tests/test_lobts.py" = ["F401"]
+
 [tool.mypy]
 python_version = "3.8"
 warn_return_any = true
