@@ -29,20 +29,20 @@ print(lob.spread_rel)
 print(lob.midprice)
 print(lob.vw_midprice)
 
-lob.aggq('ask', nlevel=3)
-lob.aggq('bid', ticks=5)
-lob.aggq('bid', price=99.7)
+lob.aggq('a', nlevel=3)
+lob.aggq('b', ticks=5)
+lob.aggq('b', price=99.7)
 
 #lob.to_xlsx('lob.xlsx')
 
 print()
 # impossible update
 lob.set_updates([
-    ('bid', 99.7, 0),
-    ('bid', 101.5, 10),
-    ('ask', 100.1, 10),
-    ('ask', 101.0, 0),
-    ('ask', 102.0, 10)
+    ('b', 99.7, 0),
+    ('b', 101.5, 10),
+    ('a', 100.1, 10),
+    ('a', 101.0, 0),
+    ('a', 102.0, 10)
 ])
 print(lob.to_np())
 print(lob.check())
