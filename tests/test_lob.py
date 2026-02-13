@@ -1,4 +1,5 @@
 import pytest
+
 from lobpy.lob import LOB
 
 # Check if numpy and pandas are available
@@ -657,7 +658,10 @@ class TestLOBAggq:
     def test_aggq_with_short_form(self):
         """Test aggq with short form side parameters ('b', 'a')."""
         lob = LOB()
-        lob.set_snapshot([(100, 10), (99, 5), (98, 3), (97, 2)], [(101, 8), (102, 4), (103, 2), (104, 6)])
+        lob.set_snapshot(
+            [(100, 10), (99, 5), (98, 3), (97, 2)],
+            [(101, 8), (102, 4), (103, 2), (104, 6)]
+        )
 
         # Test with short form 'b' for bids
         assert lob.aggq('b', nlevel=3) == 18
@@ -668,7 +672,10 @@ class TestLOBAggq:
         """Test aggq with short form and ticks parameter."""
         lob = LOB()
         lob._set_tick_size(1.0)
-        lob.set_snapshot([(100, 10), (99, 5), (98, 3), (97, 2)], [(101, 8), (102, 4), (103, 2), (104, 6)])
+        lob.set_snapshot(
+            [(100, 10), (99, 5), (98, 3), (97, 2)],
+            [(101, 8), (102, 4), (103, 2), (104, 6)]
+        )
 
         # Test with short form 'b' and ticks
         assert lob.aggq('b', ticks=2) == 18
@@ -678,7 +685,10 @@ class TestLOBAggq:
     def test_aggq_short_form_with_price(self):
         """Test aggq with short form and price parameter."""
         lob = LOB()
-        lob.set_snapshot([(100, 10), (99, 5), (98, 3), (97, 2)], [(105, 8), (103, 4), (102, 2), (101, 6)])
+        lob.set_snapshot(
+            [(100, 10), (99, 5), (98, 3), (97, 2)],
+            [(105, 8), (103, 4), (102, 2), (101, 6)]
+        )
 
         # Test with short form 'b' and price
         assert lob.aggq('b', price=98) == 10 + 5 + 3
@@ -797,6 +807,7 @@ class TestLOBToNumpy:
 @pytest.mark.skipif(not HAS_PANDAS, reason="pandas not installed")
 class TestLOBToPandas:
 
+    def test_to_pd_bids(self):
         """Test to_pd with side='b' for bids."""
         lob = LOB()
         lob.set_snapshot([(100, 10), (99, 5), (98, 3)], [])
@@ -811,6 +822,7 @@ class TestLOBToPandas:
         assert df.iloc[1]['price'] == 99
         assert df.iloc[2]['price'] == 98
 
+    def test_to_pd_asks(self):
         """Test to_pd with side='a' for asks."""
         lob = LOB()
         lob.set_snapshot([], [(101, 8), (102, 4), (103, 2)])
@@ -824,6 +836,7 @@ class TestLOBToPandas:
         assert df.iloc[1]['price'] == 102
         assert df.iloc[2]['price'] == 103
 
+    def test_to_pd_both_sides(self):
         """Test to_pd with side=None for both sides."""
         lob = LOB()
         lob.set_snapshot(
@@ -847,6 +860,7 @@ class TestLOBToPandas:
         assert df.iloc[3]['side'] == 'a'
         assert df.iloc[3]['price'] == 102
 
+    def test_to_pd_empty_book(self):
         """Test to_pd with empty order book."""
         lob = LOB()
 
@@ -861,6 +875,7 @@ class TestLOBToPandas:
         assert list(df_asks.columns) == ['price', 'size']
         assert list(df_both.columns) == ['price', 'size', 'side']
 
+    def test_to_pd_with_nlevels(self):
         """Test to_pd with nlevels parameter."""
         lob = LOB()
         lob.set_snapshot(
@@ -878,6 +893,7 @@ class TestLOBToPandas:
         assert df.iloc[1]['side'] == 'a'
         assert df.iloc[1]['price'] == 101
 
+    def test_to_pd_with_floats(self):
         """Test to_pd with float prices and sizes."""
         lob = LOB()
         lob.set_snapshot([(100.5, 10.25)], [(101.75, 8.5)])
