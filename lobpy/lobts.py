@@ -216,7 +216,7 @@ class LOBts:
             pandas Series with timestamps as index and spread values
         """
         try:
-            import pandas as pd
+            import pandas as pd  # type: ignore
         except ImportError:
             raise ImportError("pandas is required for time series methods")
 

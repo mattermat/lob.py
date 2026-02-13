@@ -461,7 +461,7 @@ class LOB():
             ImportError: If pandas is not installed
         """
         try:
-            import pandas as pd
+            import pandas as pd  # type: ignore
         except ImportError as e:
             raise ImportError(
                 "pandas is required for to_pd() method. "

@@ -39,7 +39,7 @@ def test_new():
 
     assert isinstance(slt, SortedList)
     assert isinstance(slt, SortedKeyList)
-    assert type(slt) == SortedKeyList
+    assert type(slt) is SortedKeyList
 
     slt = SortedKeyList(iter(range(1000)), key=modulo)
     assert slt == sorted(range(1000), key=modulo)
@@ -47,7 +47,7 @@ def test_new():
 
     assert isinstance(slt, SortedList)
     assert isinstance(slt, SortedKeyList)
-    assert type(slt) == SortedKeyList
+    assert type(slt) is SortedKeyList
 
 
 def test_new_error():
@@ -144,7 +144,7 @@ def test_contains():
 def test_discard():
     slt = SortedKeyList(key=modulo)
 
-    assert slt.discard(0) == None
+    assert slt.discard(0) is None
     assert len(slt) == 0
     slt._check()
 
@@ -168,7 +168,7 @@ def test_discard():
 def test_remove():
     slt = SortedKeyList(key=modulo)
 
-    assert slt.discard(0) == None
+    assert slt.discard(0) is None
     assert len(slt) == 0
     slt._check()
 

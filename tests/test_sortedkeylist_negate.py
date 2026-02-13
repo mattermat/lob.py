@@ -104,7 +104,7 @@ def test_contains():
 def test_discard():
     slt = SortedKeyList(key=negate)
 
-    assert slt.discard(0) == None
+    assert slt.discard(0) is None
     assert len(slt) == 0
     slt._check()
 
@@ -124,7 +124,7 @@ def test_discard():
 def test_remove():
     slt = SortedKeyList(key=negate)
 
-    assert slt.discard(0) == None
+    assert slt.discard(0) is None
     assert len(slt) == 0
     slt._check()
 
