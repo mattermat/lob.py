@@ -887,3 +887,251 @@ class TestLOBtsLevelAccess:
         assert len(bids) == 2
         assert bids[1000] == 100
         assert bids[2000] == 95
+
+
+class TestLOBtsQuantityTimeSeries:
+    """Test quantity time series methods (bidq_ts, askq_ts)."""
+
+    def test_bidq_time_series(self):
+        """Test getting best bid quantities as time series."""
+        lobts = LOBts()
+
+        lobts.set_snapshot([(100, 10)], [(101, 8)], timestamp=1000)
+        lobts.set_snapshot([(95, 15)], [(106, 12)], timestamp=2000)
+        lobts.set_snapshot([(90, 20)], [(110, 18)], timestamp=3000)
+
+        bidqs = lobts.bidq_ts()
+        assert len(bidqs) == 3
+        assert bidqs[1000] == 10
+        assert bidqs[2000] == 15
+        assert bidqs[3000] == 20
+
+    def test_askq_time_series(self):
+        """Test getting best ask quantities as time series."""
+        lobts = LOBts()
+
+        lobts.set_snapshot([(100, 10)], [(101, 8)], timestamp=1000)
+        lobts.set_snapshot([(95, 15)], [(106, 12)], timestamp=2000)
+        lobts.set_snapshot([(90, 20)], [(110, 18)], timestamp=3000)
+
+        askqs = lobts.askq_ts()
+        assert len(askqs) == 3
+        assert askqs[1000] == 8
+        assert askqs[2000] == 12
+        assert askqs[3000] == 18
+
+    def test_bidq_property_time_series(self):
+        """Test bidq property returns time series."""
+        lobts = LOBts()
+
+        lobts.set_snapshot([(100, 10)], [(101, 8)], timestamp=1000)
+        lobts.set_snapshot([(95, 15)], [(106, 12)], timestamp=2000)
+
+        bidqs = lobts.bidq
+        assert len(bidqs) == 2
+        assert bidqs[1000] == 10
+        assert bidqs[2000] == 15
+
+    def test_askq_property_time_series(self):
+        """Test askq property returns time series."""
+        lobts = LOBts()
+
+        lobts.set_snapshot([(100, 10)], [(101, 8)], timestamp=1000)
+        lobts.set_snapshot([(95, 15)], [(106, 12)], timestamp=2000)
+
+        askqs = lobts.askq
+        assert len(askqs) == 2
+        assert askqs[1000] == 8
+        assert askqs[2000] == 12
+
+    def test_quantity_series_name_attribute(self):
+        """Test that quantity series have correct name attribute."""
+        lobts = LOBts()
+
+        lobts.set_snapshot([(100, 10)], [(101, 8)], timestamp=1000)
+
+        bidqs = lobts.bidq_ts()
+        askqs = lobts.askq_ts()
+
+        assert bidqs.name == "bidq"
+        assert askqs.name == "askq"
+
+
+class TestLOBtsVolumeImbalanceCalculation:
+    """Test LOBts volume imbalance calculation."""
+
+    def test_vi_calculation_symmetric(self):
+        """Test VI calculation with symmetric quantities."""
+        lobts = LOBts()
+
+        lobts.set_snapshot([(100, 10)], [(101, 10)], timestamp=1000)
+
+        vi = lobts.vi
+        assert len(vi) == 1
+        assert vi[1000] == 0.0
+
+    def test_vi_calculation_bid_dominant(self):
+        """Test VI calculation when bid dominates."""
+        lobts = LOBts()
+
+        lobts.set_snapshot([(100, 15)], [(101, 5)], timestamp=1000)
+
+        vi = lobts.vi
+        assert len(vi) == 1
+        expected_vi = (15 - 5) / (15 + 5)
+        assert vi[1000] == expected_vi
+
+    def test_vi_calculation_ask_dominant(self):
+        """Test VI calculation when ask dominates."""
+        lobts = LOBts()
+
+        lobts.set_snapshot([(100, 5)], [(101, 15)], timestamp=1000)
+
+        vi = lobts.vi
+        assert len(vi) == 1
+        expected_vi = (5 - 15) / (5 + 15)
+        assert vi[1000] == expected_vi
+
+    def test_vi_calculation_multiple_levels(self):
+        """Test VI calculation with multiple levels."""
+        lobts = LOBts()
+
+        lobts.set_snapshot([(100, 10), (99, 5)], [(101, 8), (102, 4)], timestamp=1000)
+
+        vi = lobts.vi
+        assert len(vi) == 1
+        lob = lobts[1000]
+        vi_0 = lob.vi[0]
+        expected_vi_0 = (10 - 8) / (10 + 8)
+        assert vi_0 == expected_vi_0
+
+    def test_vi_time_series(self):
+        """Test VI calculation across multiple timestamps."""
+        lobts = LOBts()
+
+        lobts.set_snapshot([(100, 10)], [(101, 8)], timestamp=1000)
+        lobts.set_snapshot([(100, 15)], [(101, 5)], timestamp=2000)
+        lobts.set_snapshot([(100, 5)], [(101, 15)], timestamp=3000)
+
+        vi = lobts.vi
+        assert len(vi) == 3
+        assert vi[1000] == (10 - 8) / (10 + 8)
+        assert vi[2000] == (15 - 5) / (15 + 5)
+        assert vi[3000] == (5 - 15) / (5 + 15)
+
+    def test_vi_zero_total_quantity(self):
+        """Test VI calculation when both quantities are zero."""
+        lobts = LOBts()
+
+        lobts.set_snapshot([(100, 0)], [(101, 0)], timestamp=1000)
+
+        vi = lobts.vi
+        assert len(vi) == 1
+        assert vi[1000] == 0.0
+
+    def test_vi_extreme_values(self):
+        """Test VI calculation with extreme imbalances."""
+        lobts = LOBts()
+
+        lobts.set_snapshot([(100, 100)], [(101, 1)], timestamp=1000)
+        lobts.set_snapshot([(100, 1)], [(101, 100)], timestamp=2000)
+
+        vi = lobts.vi
+        assert len(vi) == 2
+        assert vi[1000] == (100 - 1) / (100 + 1)
+        assert vi[2000] == (1 - 100) / (1 + 100)
+
+    def test_vi_comparison_with_lob_level_access(self):
+        """Test that LOBts.vi matches LOB.vi[0] for each timestamp."""
+        lobts = LOBts()
+
+        lobts.set_snapshot([(100, 10), (99, 5)], [(101, 8), (102, 4)], timestamp=1000)
+        lobts.set_snapshot([(100, 15), (99, 7)], [(101, 5), (102, 3)], timestamp=2000)
+
+        vi_ts = lobts.vi
+        lob_1 = lobts[1000]
+        lob_2 = lobts[2000]
+
+        assert vi_ts[1000] == lob_1.vi[0]
+        assert vi_ts[2000] == lob_2.vi[0]
+
+    def test_vi_on_sliced_lobts(self):
+        """Test VI time series on sliced LOBts."""
+        lobts = LOBts()
+
+        lobts.set_snapshot([(100, 10)], [(101, 8)], timestamp=1000)
+        lobts.set_snapshot([(100, 15)], [(101, 5)], timestamp=2000)
+        lobts.set_snapshot([(100, 5)], [(101, 15)], timestamp=3000)
+        lobts.set_snapshot([(100, 10)], [(101, 10)], timestamp=4000)
+
+        sliced = lobts[1500:3500]
+
+        assert sliced.len == 2
+        vi_sliced = sliced.vi
+        assert len(vi_sliced) == 2
+        assert 2000 in vi_sliced.index
+        assert 3000 in vi_sliced.index
+        assert 1000 not in vi_sliced.index
+        assert 4000 not in vi_sliced.index
+
+    def test_bid_ask_timeseries_on_sliced_lobts(self):
+        """Test bid and ask time series on sliced LOBts."""
+        lobts = LOBts()
+
+        lobts.set_snapshot([(100, 10)], [(101, 8)], timestamp=1000)
+        lobts.set_snapshot([(95, 15)], [(106, 12)], timestamp=2000)
+        lobts.set_snapshot([(90, 20)], [(110, 15)], timestamp=3000)
+        lobts.set_snapshot([(85, 25)], [(115, 18)], timestamp=4000)
+
+        sliced = lobts[1500:3500]
+
+        assert sliced.len == 2
+
+        bid_sliced = sliced.bid
+        assert len(bid_sliced) == 2
+        assert 2000 in bid_sliced.index
+        assert 3000 in bid_sliced.index
+        assert bid_sliced[2000] == 95
+        assert bid_sliced[3000] == 90
+        assert 1000 not in bid_sliced.index
+        assert 4000 not in bid_sliced.index
+
+        ask_sliced = sliced.ask
+        assert len(ask_sliced) == 2
+        assert 2000 in ask_sliced.index
+        assert 3000 in ask_sliced.index
+        assert ask_sliced[2000] == 106
+        assert ask_sliced[3000] == 110
+        assert 1000 not in ask_sliced.index
+        assert 4000 not in ask_sliced.index
+
+    def test_bidq_askq_timeseries_on_sliced_lobts(self):
+        """Test bidq and askq time series on sliced LOBts."""
+        lobts = LOBts()
+
+        lobts.set_snapshot([(100, 10)], [(101, 8)], timestamp=1000)
+        lobts.set_snapshot([(95, 15)], [(106, 12)], timestamp=2000)
+        lobts.set_snapshot([(90, 20)], [(110, 15)], timestamp=3000)
+        lobts.set_snapshot([(85, 25)], [(115, 18)], timestamp=4000)
+
+        sliced = lobts[1500:3500]
+
+        assert sliced.len == 2
+
+        bidq_sliced = sliced.bidq
+        assert len(bidq_sliced) == 2
+        assert 2000 in bidq_sliced.index
+        assert 3000 in bidq_sliced.index
+        assert bidq_sliced[2000] == 15
+        assert bidq_sliced[3000] == 20
+        assert 1000 not in bidq_sliced.index
+        assert 4000 not in bidq_sliced.index
+
+        askq_sliced = sliced.askq
+        assert len(askq_sliced) == 2
+        assert 2000 in askq_sliced.index
+        assert 3000 in askq_sliced.index
+        assert askq_sliced[2000] == 12
+        assert askq_sliced[3000] == 15
+        assert 1000 not in askq_sliced.index
+        assert 4000 not in askq_sliced.index

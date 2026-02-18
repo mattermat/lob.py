@@ -190,7 +190,7 @@ class LOB:
         try:
             del self._asks[price_level]
         except KeyError:
-            pass  # TODO: error message
+            print(f"price level {price_level} not existing on ask side")
         return
 
     def _delete_bid_level(self, price_level, timestamp=0):
@@ -199,7 +199,7 @@ class LOB:
         try:
             del self._bids[price_level]
         except KeyError:
-            pass  # TODO: error message
+            print(f"price level {price_level} not existing on bid side")
         return
 
     def update(self, side, price_level, size, timestamp=0):
