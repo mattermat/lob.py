@@ -2,7 +2,7 @@ import random
 from itertools import chain
 
 import pytest
-from sortedcontainers import SortedList
+from lobpy.sortedlist import SortedList
 
 
 def test_init():

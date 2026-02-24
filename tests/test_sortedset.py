@@ -1,4 +1,4 @@
-from sortedcontainers import SortedSet
+from lobpy.sortedset import SortedSet
 
 
 def negate(value):

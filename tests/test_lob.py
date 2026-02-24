@@ -2,16 +2,8 @@ import pytest
 
 from lobpy.lob import LOB
 
-# Check if numpy and pandas are available
-try:
-    import numpy as np
-    import pandas as pd
-
-    HAS_NUMPY = True
-    HAS_PANDAS = True
-except ImportError:
-    HAS_NUMPY = False
-    HAS_PANDAS = False
+import numpy as np
+import pandas as pd
 
 
 class TestLOBInit:
@@ -789,7 +781,6 @@ class TestLOBToNumpy:
         assert result[2, 2] == 8.75
 
 
-@pytest.mark.skipif(not HAS_PANDAS, reason="pandas not installed")
 class TestLOBToPandas:
 
     def test_to_pd_bids(self):

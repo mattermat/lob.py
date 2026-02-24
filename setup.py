@@ -34,7 +34,8 @@ setup(
     ],
     python_requires=">=3.8",
     install_requires=[
-        "sortedcontainers>=2.4.0",
+        "numpy>=1.20.0",
+        "pandas>=1.3.0",
     ],
     keywords="limit order book lob trading finance",
     project_urls={
