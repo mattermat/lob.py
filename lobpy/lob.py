@@ -1,7 +1,7 @@
 import time
+from typing import Any
 
 from .sorteddict import SortedDict
-
 
 def neg(x: int) -> int:
     return -x
@@ -17,7 +17,65 @@ def _normalize_side(side: str) -> str:
         return side
 
 
-class PriceAccessor:
+class _TopValueNumericMixin:
+    """Mixin that makes an accessor behave like float(self[0]) in numeric contexts."""
+
+    def _top(self) -> float:
+        return float(self[0])  # relies on __getitem__
+
+    def __float__(self) -> float:
+        return self._top()
+
+    def __int__(self) -> int:
+        return int(self._top())
+
+    # arithmetic
+    def __add__(self, other: Any):
+        return self._top() + float(other)
+
+    def __radd__(self, other: Any):
+        return float(other) + self._top()
+
+    def __sub__(self, other: Any):
+        return self._top() - float(other)
+
+    def __rsub__(self, other: Any):
+        return float(other) - self._top()
+
+    def __mul__(self, other: Any):
+        return self._top() * float(other)
+
+    def __rmul__(self, other: Any):
+        return float(other) * self._top()
+
+    def __truediv__(self, other: Any):
+        return self._top() / float(other)
+
+    def __rtruediv__(self, other: Any):
+        return float(other) / self._top()
+
+    # unary
+    def __neg__(self):
+        return -self._top()
+
+    def __abs__(self):
+        return abs(self._top())
+
+    # comparisons (optional but usually expected)
+    def __lt__(self, other: Any) -> bool:
+        return self._top() < float(other)
+
+    def __le__(self, other: Any) -> bool:
+        return self._top() <= float(other)
+
+    def __gt__(self, other: Any) -> bool:
+        return self._top() > float(other)
+
+    def __ge__(self, other: Any) -> bool:
+        return self._top() >= float(other)
+
+
+class PriceAccessor(_TopValueNumericMixin):
     def __init__(self, data):
         self._data = data
 
@@ -36,7 +94,7 @@ class PriceAccessor:
         return str(self[0])
 
 
-class QuantityAccessor:
+class QuantityAccessor(_TopValueNumericMixin):
     def __init__(self, data):
         self._data = data
 
@@ -55,7 +113,7 @@ class QuantityAccessor:
         return str(self[0])
 
 
-class VolumeImbalanceAccessor:
+class VolumeImbalanceAccessor(_TopValueNumericMixin):
     def __init__(self, bids, asks):
         self._bids = bids
         self._asks = asks
