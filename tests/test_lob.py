@@ -480,11 +480,11 @@ class TestLOBNumericAccessors:
         assert lob.askq + lob.askq
 
     def test_numeric_vi(self):
-        lob = LOB(bids=[(95, 5)], asks=[(100, 10), (99, 5)])
-        assert lob.vi
-        assert lob.vi + 1
-        assert 1 + lob.vi
-        assert lob.vi + lob.vi
+        lob = LOB(bids=[(95, 5)], asks=[(100, 10), (99, 6)])
+        assert lob.vi == ((5-6)/(6+5))
+        assert lob.vi + 1 == ((5-6)/(6+5) + 1)
+        assert 1 + lob.vi == ((5-6)/(6+5) + 1)
+        assert lob.vi + lob.vi == ((5-6)/(6+5) * 2)
 
 
 class TestLOBBestPriceOrdering:
