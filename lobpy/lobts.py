@@ -317,6 +317,62 @@ class LOBts:
 
         return pd.Series(asks, index=timestamps, name="ask")
 
+    def bidq_ts(self, start_ts=None, end_ts=None):
+        """
+        Return best bid quantity time series.
+
+        Args:
+            start_ts: Start timestamp (inclusive)
+            end_ts: End timestamp (inclusive)
+
+        Returns:
+            pandas Series with timestamps as index and bid quantity values
+        """
+        try:
+            import pandas as pd
+        except ImportError:
+            raise ImportError("pandas is required for time series methods")
+
+        bidqs = []
+        timestamps = []
+        for ts in self._lobs.keys():
+            if start_ts is not None and ts < start_ts:
+                continue
+            if end_ts is not None and ts > end_ts:
+                continue
+            bidqs.append(self._lobs[ts].bidq[0])
+            timestamps.append(ts)
+
+        return pd.Series(bidqs, index=timestamps, name="bidq")
+
+    def askq_ts(self, start_ts=None, end_ts=None):
+        """
+        Return best ask quantity time series.
+
+        Args:
+            start_ts: Start timestamp (inclusive)
+            end_ts: End timestamp (inclusive)
+
+        Returns:
+            pandas Series with timestamps as index and ask quantity values
+        """
+        try:
+            import pandas as pd
+        except ImportError:
+            raise ImportError("pandas is required for time series methods")
+
+        askqs = []
+        timestamps = []
+        for ts in self._lobs.keys():
+            if start_ts is not None and ts < start_ts:
+                continue
+            if end_ts is not None and ts > end_ts:
+                continue
+            askqs.append(self._lobs[ts].askq[0])
+            timestamps.append(ts)
+
+        return pd.Series(askqs, index=timestamps, name="askq")
+
     @property
     def spread(self):
         """Return spread time series as property."""
@@ -336,6 +392,16 @@ class LOBts:
     def midprice(self):
         """Return mid-price time series as property."""
         return self.midprice_ts()
+
+    @property
+    def bidq(self):
+        """Return bid quantity time series as property."""
+        return self.bidq_ts()
+
+    @property
+    def askq(self):
+        """Return ask quantity time series as property."""
+        return self.askq_ts()
 
     @property
     def vw_midprice(self):
@@ -377,7 +443,12 @@ class LOBts:
         timestamps = []
         for ts in self._lobs.keys():
             latest = self._lobs[ts]
-            vi_values.append(latest.bidq[0] - latest.askq[0])
+            bid_size = latest.bidq[0]
+            ask_size = latest.askq[0]
+            if bid_size + ask_size == 0:
+                vi_values.append(0.0)
+            else:
+                vi_values.append((bid_size - ask_size) / (bid_size + ask_size))
             timestamps.append(ts)
 
         return pd.Series(vi_values, index=timestamps, name="vi")
