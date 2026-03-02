@@ -2,7 +2,8 @@ import random
 from itertools import chain
 
 import pytest
-from sortedcontainers import SortedKeyList, SortedListWithKey
+
+from lobpy.sortedlist import SortedKeyList, SortedListWithKey
 
 
 def negate(val):

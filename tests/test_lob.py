@@ -1,17 +1,8 @@
+import numpy as np
+import pandas as pd
 import pytest
 
 from lobpy.lob import LOB
-
-# Check if numpy and pandas are available
-try:
-    import numpy as np
-    import pandas as pd
-
-    HAS_NUMPY = True
-    HAS_PANDAS = True
-except ImportError:
-    HAS_NUMPY = False
-    HAS_PANDAS = False
 
 
 class TestLOBInit:
@@ -465,6 +456,37 @@ class TestLOBRepr:
         assert repr(lob) == "<Book[my_book]>"
 
 
+class TestLOBNumericAccessors:
+    """Test LOB accessor returning numbers"""
+
+    def test_numeric_bid(self):
+        lob = LOB(bids=[(100, 10), (99, 5)], asks=[])
+        assert lob.bid
+        assert lob.bid + 1
+        assert 1 + lob.bid
+        assert lob.bid + lob.bid
+        assert lob.bidq
+        assert lob.bidq + 1
+        assert lob.bidq + lob.bidq
+
+    def test_numeric_ask(self):
+        lob = LOB(bids=[], asks=[(100, 10), (99, 5)])
+        assert lob.ask
+        assert lob.ask + 1
+        assert 1 + lob.ask
+        assert lob.ask + lob.ask
+        assert lob.askq
+        assert lob.askq + 1
+        assert lob.askq + lob.askq
+
+    def test_numeric_vi(self):
+        lob = LOB(bids=[(95, 5)], asks=[(100, 10), (99, 6)])
+        assert lob.vi == ((5 - 6) / (6 + 5))
+        assert lob.vi + 1 == ((5 - 6) / (6 + 5) + 1)
+        assert 1 + lob.vi == ((5 - 6) / (6 + 5) + 1)
+        assert lob.vi + lob.vi == ((5 - 6) / (6 + 5) * 2)
+
+
 class TestLOBBestPriceOrdering:
     """Test that best prices are correctly ordered."""
 
@@ -789,7 +811,6 @@ class TestLOBToNumpy:
         assert result[2, 2] == 8.75
 
 
-@pytest.mark.skipif(not HAS_PANDAS, reason="pandas not installed")
 class TestLOBToPandas:
 
     def test_to_pd_bids(self):

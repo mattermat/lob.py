@@ -1,15 +1,7 @@
+import numpy as np
+import pandas as pd
+
 from lobpy.lobts import LOBts
-
-# Check if numpy and pandas are available
-try:
-    import numpy as np
-    import pandas as pd
-
-    HAS_NUMPY = True
-    HAS_PANDAS = True
-except ImportError:
-    HAS_NUMPY = False
-    HAS_PANDAS = False
 
 
 class TestLOBtsInit:

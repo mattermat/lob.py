@@ -1,7 +1,8 @@
 import random
 
 import pytest
-from sortedcontainers import SortedKeyList, SortedList
+
+from lobpy.sortedlist import SortedKeyList, SortedList
 
 
 def modulo(val):
