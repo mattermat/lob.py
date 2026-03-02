@@ -21,6 +21,9 @@ def _normalize_side(side: str) -> str:
 class _TopValueNumericMixin:
     """Mixin that makes an accessor behave like float(self[0]) in numeric contexts."""
 
+    def __getitem__(self, index):
+        raise NotImplementedError
+
     def _top(self) -> float:
         return float(self[0])  # relies on __getitem__
 
