@@ -3,6 +3,7 @@ from typing import Any
 
 from .sorteddict import SortedDict
 
+
 def neg(x: int) -> int:
     return -x
 

@@ -1,9 +1,8 @@
+import numpy as np
+import pandas as pd
 import pytest
 
 from lobpy.lob import LOB
-
-import numpy as np
-import pandas as pd
 
 
 class TestLOBInit:

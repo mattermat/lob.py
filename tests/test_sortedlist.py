@@ -2,6 +2,7 @@ import random
 from itertools import chain
 
 import pytest
+
 from lobpy.sortedlist import SortedList
 
 

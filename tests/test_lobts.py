@@ -1,7 +1,7 @@
-from lobpy.lobts import LOBts
-
 import numpy as np
 import pandas as pd
+
+from lobpy.lobts import LOBts
 
 
 class TestLOBtsInit:
