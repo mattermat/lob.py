@@ -3,6 +3,7 @@ Guéant intensity function estimation.
 
 Model: λ(δ) = A * exp(-k * δ)
 Reference: Guéant, Lehalle, Fernandez-Tapia (2013)
+# TODO: add link to the paper
 """
 
 import bisect
@@ -107,6 +108,41 @@ def _compute_buckets(tl, side):
     return pd.DataFrame(rows, columns=["delta", "N", "T", "lambda"])
 
 
+def _aggregate_buckets(raw, thresholds):
+    """
+    Aggregate integer-δ buckets into custom threshold bins.
+
+    thresholds: sorted list of upper bounds, e.g. [1, 3, 5, 10].
+    Bin i covers (thresholds[i-1], thresholds[i]], with the first bin starting at 0.
+    Each bin's λ̂ = N_sum / T_sum; the threshold is used as the representative δ.
+
+    Args:
+        raw:        pd.DataFrame from _compute_buckets (columns: delta, N, T, lambda)
+        thresholds: list of int/float upper bounds
+
+    Returns:
+        pd.DataFrame with columns [delta, N, T, lambda], one row per threshold.
+    """
+    thresholds = sorted(thresholds)
+    rows = []
+    lower = -1  # exclusive lower bound; first bin covers delta >= 0
+    for upper in thresholds:
+        mask = (raw["delta"] > lower) & (raw["delta"] <= upper)
+        subset = raw[mask]
+        N_total = subset["N"].sum()
+        T_total = subset["T"].sum()
+        lam = N_total / T_total if T_total > 0 and N_total > 0 else float("nan")
+        rows.append((upper, int(N_total), T_total, lam))
+        lower = upper
+    # overflow bin: all δ > last threshold (not used in fit, lambda=nan)
+    overflow = raw[raw["delta"] > lower]
+    if not overflow.empty:
+        N_total = overflow["N"].sum()
+        T_total = overflow["T"].sum()
+        rows.append((float("inf"), int(N_total), T_total, float("nan")))
+    return pd.DataFrame(rows, columns=["delta", "N", "T", "lambda"])
+
+
 def _fit(buckets):
     """
     Fit λ(δ) = A * exp(-k * δ) via log-linear regression.
@@ -123,7 +159,7 @@ def _fit(buckets):
         return float("nan"), float("nan")
     x = valid["delta"].values.astype(float)
     y = np.log(valid["lambda"].values.astype(float))
-    slope, intercept = np.polyfit(x, y, 1)
+    intercept, slope = np.polynomial.polynomial.polyfit(x, y, 1)
     return float(np.exp(intercept)), float(-slope)
 
 
@@ -146,49 +182,67 @@ class GueantAccessor:
     def __init__(self, tl):
         self._tl = tl
 
-    def buckets(self, side):
+    def buckets(self, side, buckets=None):
         """
         Return empirical intensity buckets λ̂(δ) = N(δ) / T(δ).
 
         Args:
-            side: 'a' (ask) or 'b' (bid)
+            side:    'a' (ask) or 'b' (bid)
+            buckets: Optional list of δ thresholds (same semantics as ask/bid).
 
         Returns:
             pd.DataFrame with columns [delta, N, T, lambda]
         """
-        return _compute_buckets(self._tl, side)
+        raw = _compute_buckets(self._tl, side)
+        return _aggregate_buckets(raw, buckets) if buckets is not None else raw
 
-    def ask(self, window_size=None):
+    def ask(self, window_size=None, buckets=None):
         """
         Estimate A and k for the ask side (buy aggressor trades).
 
         Args:
             window_size: If None, returns (A, k) over the full timeline.
                          If given, returns (pd.Series_A, pd.Series_k) over rolling windows.
+            buckets: Optional list of δ thresholds (e.g. [1, 3, 5, 10]).
+                     Each threshold defines a bin upper bound; trades above the last
+                     threshold are collected in a silent overflow bin (excluded from fit).
+                     If None, one data point per integer δ is used.
         """
+        def _compute(tl):
+            raw = _compute_buckets(tl, "a")
+            return _aggregate_buckets(raw, buckets) if buckets is not None else raw
+
         if window_size is None:
-            return _fit(_compute_buckets(self._tl, "a"))
+            return _fit(_compute(self._tl))
         A_vals, k_vals = {}, {}
         for ts, window in self._tl._rolling_items(window_size):
-            A_vals[ts], k_vals[ts] = _fit(_compute_buckets(window, "a"))
+            A_vals[ts], k_vals[ts] = _fit(_compute(window))
         return (
             pd.Series(A_vals, name="gueant_A_ask"),
             pd.Series(k_vals, name="gueant_k_ask"),
         )
 
-    def bid(self, window_size=None):
+    def bid(self, window_size=None, buckets=None):
         """
         Estimate A and k for the bid side (sell aggressor trades).
 
         Args:
             window_size: If None, returns (A, k) over the full timeline.
                          If given, returns (pd.Series_A, pd.Series_k) over rolling windows.
+            buckets: Optional list of δ thresholds (e.g. [1, 3, 5, 10]).
+                     Each threshold defines a bin upper bound; trades above the last
+                     threshold are collected in a silent overflow bin (excluded from fit).
+                     If None, one data point per integer δ is used.
         """
+        def _compute(tl):
+            raw = _compute_buckets(tl, "b")
+            return _aggregate_buckets(raw, buckets) if buckets is not None else raw
+
         if window_size is None:
-            return _fit(_compute_buckets(self._tl, "b"))
+            return _fit(_compute(self._tl))
         A_vals, k_vals = {}, {}
         for ts, window in self._tl._rolling_items(window_size):
-            A_vals[ts], k_vals[ts] = _fit(_compute_buckets(window, "b"))
+            A_vals[ts], k_vals[ts] = _fit(_compute(window))
         return (
             pd.Series(A_vals, name="gueant_A_bid"),
             pd.Series(k_vals, name="gueant_k_bid"),

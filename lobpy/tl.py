@@ -2,7 +2,45 @@
 TimeLine (TL) - combines LOBts with trade events.
 """
 
+import numpy as np
+import pandas as pd
+
 from .lobts import LOBts
+from .gueant import GueantAccessor
+
+# Mapping from period string to seconds
+_OHLC_PERIODS = {
+    '1s':  1,
+    '5s':  5,
+    '1m':  60,
+    '15m': 900,
+    '1h':  3_600,
+    '24h': 86_400,
+}
+
+# Timestamp unit → number of units per second
+def _realized_vol(trades):
+    """
+    Compute realized volatility from a list of Trade objects.
+
+    Realized volatility = sqrt(sum of squared log returns), where log returns
+    are computed on trade prices sorted by timestamp.
+
+    Returns nan if fewer than 2 trades.
+    """
+    if len(trades) < 2:
+        return float("nan")
+    prices = [t.price for t in sorted(trades, key=lambda t: t.timestamp)]
+    log_returns = np.diff(np.log(prices))
+    return float(np.sqrt(np.sum(log_returns ** 2)))
+
+
+_TS_UNITS = {
+    's':  1,
+    'ms': 1_000,
+    'us': 1_000_000,
+    'ns': 1_000_000_000,
+}
 
 
 class Trade:
@@ -34,15 +72,23 @@ class TL:
                   'snapshot' (full snapshots at each update)
         update_type: 'realtime' (sparse updates/snapshots) or
                      'fixed' (update/snapshots at regular intervals)
+        timestamp_unit: Unit of all timestamps. One of 's', 'ms', 'us', 'ns'.
+                        Defaults to 'ns' (nanoseconds).
     """
 
-    def __init__(self, name=None, tick_size=1, lob_mode='delta', update_type='realtime'):
+    def __init__(self, name=None, tick_size=1, lob_mode='delta', update_type='realtime',
+                 timestamp_unit='ns'):
+        if timestamp_unit not in _TS_UNITS:
+            raise ValueError(
+                f"Unknown timestamp_unit '{timestamp_unit}'. Accepted: {list(_TS_UNITS)}"
+            )
         if name is None:
             name = f"tl{id(self)}"
         self.name = name
         self.tick_size = tick_size
         self.lob_mode = lob_mode
         self.update_type = update_type
+        self.timestamp_unit = timestamp_unit
         _lobts_mode = 'latest' if lob_mode == 'snapshot' else 'delta'
         self._lobts = LOBts(name=name, tick_size=tick_size, mode=_lobts_mode)
         self._trades = []
@@ -144,11 +190,6 @@ class TL:
             DataFrame with columns: timestamp, type, side, level, price, size.
             type is 'lob' or 'trade'; level is NaN for trade rows.
         """
-        try:
-            import pandas as pd
-        except ImportError:
-            raise ImportError("pandas is required for to_pd()")
-
         return pd.DataFrame(
             self._iter_rows(),
             columns=["timestamp", "type", "side", "level", "price", "size"],
@@ -162,11 +203,6 @@ class TL:
             Object array with columns: timestamp, type, side, level, price, size.
             type is 'lob' or 'trade'; level is NaN for trade rows.
         """
-        try:
-            import numpy as np
-        except ImportError:
-            raise ImportError("numpy is required for to_np()")
-
         rows = self._iter_rows()
         if not rows:
             return np.empty((0, 6), dtype=object)
@@ -190,6 +226,7 @@ class TL:
             tick_size=self.tick_size,
             lob_mode=self.lob_mode,
             update_type=self.update_type,
+            timestamp_unit=self.timestamp_unit,
         )
         result._lobts = self._lobts.get_range(start, stop)
         result._trades = [
@@ -228,10 +265,80 @@ class TL:
         for ts in self.timestamps:
             yield ts, self[ts - window_size:ts]
 
+    def ohlc(self, period):
+        """
+        Compute OHLC candles from trade data.
+
+        Trades are bucketed into fixed time windows of the given period.
+        Uses the timestamp_unit set at construction time.
+
+        Args:
+            period: One of '1s', '5s', '1m', '15m', '1h', '24h'.
+
+        Returns:
+            pd.DataFrame indexed by candle-open timestamp (ns) with columns:
+            open, high, low, close, volume, count.
+        """
+        if period not in _OHLC_PERIODS:
+            raise ValueError(
+                f"Unknown period '{period}'. Accepted: {list(_OHLC_PERIODS)}"
+            )
+        if not self._trades:
+            return pd.DataFrame(
+                columns=["open", "high", "low", "close", "volume", "count"]
+            )
+
+        period_ts = _OHLC_PERIODS[period] * _TS_UNITS[self.timestamp_unit]
+        buckets = {}  # bucket_start -> list of Trade (insertion order = time order)
+        for trade in sorted(self._trades, key=lambda t: t.timestamp):
+            bucket = (trade.timestamp // period_ts) * period_ts
+            if bucket not in buckets:
+                buckets[bucket] = []
+            buckets[bucket].append(trade)
+
+        rows = {}
+        for bucket_ts in sorted(buckets):
+            trades = buckets[bucket_ts]
+            prices = [t.price for t in trades]
+            rows[bucket_ts] = {
+                "open":   prices[0],
+                "high":   max(prices),
+                "low":    min(prices),
+                "close":  prices[-1],
+                "volume": sum(t.volume for t in trades),
+                "count":  len(trades),
+            }
+
+        df = pd.DataFrame.from_dict(rows, orient="index")
+        df.index.name = "timestamp"
+        return df
+
+    def realized_vol(self, window_size=None):
+        """
+        Compute realized volatility from trade prices.
+
+        Realized volatility = sqrt(sum of squared log returns) over the
+        sequence of trade prices sorted by timestamp.
+
+        Args:
+            window_size: If None, returns a scalar over all trades.
+                         If given, returns a pd.Series of realized vol values
+                         computed over rolling windows of the given size
+                         (same units as timestamps).
+
+        Returns:
+            float (scalar) or pd.Series indexed by end timestamp.
+        """
+        if window_size is None:
+            return _realized_vol(self._trades)
+        vals = {}
+        for ts, window in self._rolling_items(window_size):
+            vals[ts] = _realized_vol(window._trades)
+        return pd.Series(vals, name="realized_vol")
+
     @property
     def gueant(self):
         """Accessor for Guéant intensity function parameters (λ(δ) = A·exp(-k·δ))."""
-        from .gueant import GueantAccessor
         return GueantAccessor(self)
 
     def __repr__(self):
