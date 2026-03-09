@@ -1,11 +1,7 @@
 from lobpy.tl import TL, Trade
 
-
-try:
-    import pandas as pd
-    HAS_PANDAS = True
-except ImportError:
-    HAS_PANDAS = False
+import pandas as pd
+import pytest
 
 
 class TestTrade:
@@ -1623,6 +1619,1227 @@ class TestTLGueantIntegration:
         assert isinstance(k_ask_roll, pd.Series)
         assert isinstance(A_bid_roll, pd.Series)
         assert isinstance(k_bid_roll, pd.Series)
+
+
+class TestTLGueantCustomBuckets:
+    """Test Guéant with custom buckets parameter."""
+
+    def test_ask_with_custom_buckets(self):
+        """Test ask() with custom buckets parameter."""
+        tl = TL(tick_size=1.0)
+        tl.add_lob_snapshot(timestamp=1000, bids=[(100.0, 10.0)], asks=[(101.0, 8.0)])
+        tl.add_trade(timestamp=1100, side="b", price=101.0, volume=0.5)
+        tl.add_trade(timestamp=1150, side="b", price=101.0, volume=0.3)
+        tl.add_trade(timestamp=1200, side="b", price=102.0, volume=0.2)
+
+        custom_buckets = [1, 2, 5, 10]
+        A_ask, k_ask = tl.gueant.ask(buckets=custom_buckets)
+
+        assert isinstance(A_ask, float)
+        assert isinstance(k_ask, float)
+
+    def test_bid_with_custom_buckets(self):
+        """Test bid() with custom buckets parameter."""
+        tl = TL(tick_size=1.0)
+        tl.add_lob_snapshot(timestamp=1000, bids=[(100.0, 10.0)], asks=[(101.0, 8.0)])
+        tl.add_trade(timestamp=1100, side="s", price=100.0, volume=0.5)
+        tl.add_trade(timestamp=1150, side="s", price=99.0, volume=0.3)
+        tl.add_trade(timestamp=1200, side="s", price=98.0, volume=0.2)
+
+        custom_buckets = [1, 2, 5, 10]
+        A_bid, k_bid = tl.gueant.bid(buckets=custom_buckets)
+
+        assert isinstance(A_bid, float)
+        assert isinstance(k_bid, float)
+
+    def test_ask_with_window_and_custom_buckets(self):
+        """Test ask() with both window_size and custom buckets."""
+        tl = TL(tick_size=1.0)
+        timestamps = [1000, 1100, 1200, 1300, 1400]
+
+        for i, ts in enumerate(timestamps):
+            tl.add_lob_snapshot(
+                timestamp=ts,
+                bids=[(100.0 + i * 0.1, 10.0)],
+                asks=[(101.0 + i * 0.1, 8.0)],
+            )
+
+        tl.add_trade(timestamp=1150, side="b", price=101.0, volume=0.5)
+        tl.add_trade(timestamp=1250, side="b", price=101.1, volume=0.3)
+
+        custom_buckets = [1, 3, 5, 10]
+        Aa, ka = tl.gueant.ask(200, buckets=custom_buckets)
+
+        assert isinstance(Aa, pd.Series)
+        assert isinstance(ka, pd.Series)
+        assert len(Aa) == len(tl.timestamps)
+        assert len(ka) == len(tl.timestamps)
+
+    def test_bid_with_window_and_custom_buckets(self):
+        """Test bid() with both window_size and custom buckets."""
+        tl = TL(tick_size=1.0)
+        timestamps = [1000, 1100, 1200, 1300, 1400]
+
+        for i, ts in enumerate(timestamps):
+            tl.add_lob_snapshot(
+                timestamp=ts,
+                bids=[(100.0 + i * 0.1, 10.0)],
+                asks=[(101.0 + i * 0.1, 8.0)],
+            )
+
+        tl.add_trade(timestamp=1150, side="s", price=100.0, volume=0.5)
+        tl.add_trade(timestamp=1250, side="s", price=99.9, volume=0.3)
+
+        custom_buckets = [1, 3, 5, 10]
+        Ab, kb = tl.gueant.bid(200, buckets=custom_buckets)
+
+        assert isinstance(Ab, pd.Series)
+        assert isinstance(kb, pd.Series)
+        assert len(Ab) == len(tl.timestamps)
+        assert len(kb) == len(tl.timestamps)
+
+    def test_ask_rolling_returns_series_with_index(self):
+        """Test that rolling ask() returns Series with correct index."""
+        tl = TL(tick_size=1.0)
+        tl.add_lob_snapshot(timestamp=1000, bids=[(100.0, 10.0)], asks=[(101.0, 8.0)])
+        tl.add_lob_snapshot(timestamp=1200, bids=[(100.5, 12.0)], asks=[(101.5, 10.0)])
+        tl.add_trade(timestamp=1100, side="b", price=101.0, volume=0.5)
+        tl.add_trade(timestamp=1300, side="b", price=101.5, volume=0.3)
+
+        Aa, ka = tl.gueant.ask(200)
+
+        assert isinstance(Aa, pd.Series)
+        assert isinstance(ka, pd.Series)
+        assert list(Aa.index) == tl.timestamps
+        assert list(ka.index) == tl.timestamps
+
+    def test_bid_rolling_returns_series_with_index(self):
+        """Test that rolling bid() returns Series with correct index."""
+        tl = TL(tick_size=1.0)
+        tl.add_lob_snapshot(timestamp=1000, bids=[(100.0, 10.0)], asks=[(101.0, 8.0)])
+        tl.add_lob_snapshot(timestamp=1200, bids=[(99.5, 12.0)], asks=[(101.5, 10.0)])
+        tl.add_trade(timestamp=1100, side="s", price=100.0, volume=0.5)
+        tl.add_trade(timestamp=1300, side="s", price=99.0, volume=0.3)
+
+        Ab, kb = tl.gueant.bid(200)
+
+        assert isinstance(Ab, pd.Series)
+        assert isinstance(kb, pd.Series)
+        assert list(Ab.index) == tl.timestamps
+        assert list(kb.index) == tl.timestamps
+
+
+class TestTLGueantCompleteTimeline:
+    """Test Gueant parameters on complete timeline."""
+
+    def test_complete_timeline_ask_and_bid(self):
+        """Test computing A and k for both ask and bid sides."""
+        tl = TL(tick_size=0.5)
+
+        timestamps = [1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900]
+
+        for i, ts in enumerate(timestamps):
+            bid_price = 100.0 + (i * 0.1)
+            ask_price = 101.0 + (i * 0.1)
+            tl.add_lob_snapshot(
+                timestamp=ts,
+                bids=[(bid_price, 10.0), (bid_price - 0.5, 8.0)],
+                asks=[(ask_price, 10.0), (ask_price + 0.5, 8.0)],
+            )
+
+        tl.add_trade(timestamp=1150, side="b", price=101.0, volume=0.5)
+        tl.add_trade(timestamp=1250, side="b", price=101.1, volume=0.3)
+        tl.add_trade(timestamp=1350, side="s", price=100.6, volume=0.4)
+        tl.add_trade(timestamp=1450, side="b", price=101.2, volume=0.6)
+
+        A_ask, k_ask = tl.gueant.ask()
+        A_bid, k_bid = tl.gueant.bid()
+
+        assert isinstance(A_ask, float)
+        assert isinstance(k_ask, float)
+        assert isinstance(A_bid, float)
+        assert isinstance(k_bid, float)
+
+    def test_buckets_bid_dataframe(self):
+        """Test that buckets('b') returns proper DataFrame."""
+        tl = TL(tick_size=1.0)
+        tl.add_lob_snapshot(timestamp=1000, bids=[(100.0, 10.0)], asks=[(101.0, 8.0)])
+        tl.add_trade(timestamp=1100, side="s", price=100.0, volume=0.5)
+        tl.add_trade(timestamp=1150, side="s", price=99.0, volume=0.3)
+
+        buckets_df = tl.gueant.buckets("b")
+
+        assert isinstance(buckets_df, pd.DataFrame)
+        assert list(buckets_df.columns) == ["delta", "N", "T", "lambda"]
+
+    def test_rolling_gueant_parameters(self):
+        """Test rolling Gueant intensity function parameters."""
+        tl = TL(tick_size=1.0)
+
+        timestamps = [1000, 1100, 1200, 1300, 1400, 1500]
+
+        for i, ts in enumerate(timestamps):
+            tl.add_lob_snapshot(
+                timestamp=ts,
+                bids=[(100.0 + i * 0.1, 10.0)],
+                asks=[(101.0 + i * 0.1, 8.0)],
+            )
+
+        tl.add_trade(timestamp=1150, side="b", price=101.0, volume=0.5)
+        tl.add_trade(timestamp=1250, side="b", price=101.1, volume=0.3)
+        tl.add_trade(timestamp=1350, side="s", price=100.6, volume=0.4)
+
+        Aa, ka = tl.gueant.ask(200)
+        Ab, kb = tl.gueant.bid(200)
+
+        assert isinstance(Aa, pd.Series)
+        assert isinstance(ka, pd.Series)
+        assert isinstance(Ab, pd.Series)
+        assert isinstance(kb, pd.Series)
+        assert len(Aa) == len(tl.timestamps)
+        assert len(ka) == len(tl.timestamps)
+        assert len(Ab) == len(tl.timestamps)
+        assert len(kb) == len(tl.timestamps)
+
+
+class TestTLGueantCalculations:
+    """Test correctness of Gueant intensity function calculations."""
+
+    def test_ask_delta_calculation(self):
+        """Test delta calculation for ask side: δ = (trade_price - best_bid) / tick_size."""
+        tl = TL(tick_size=1.0)
+        tl.add_lob_snapshot(timestamp=1000, bids=[(100.0, 10.0)], asks=[(101.0, 8.0)])
+
+        # Trade at best_bid: delta = 0
+        tl.add_trade(timestamp=1100, side="b", price=100.0, volume=0.5)
+        # Trade at best_ask: delta = (101 - 100) / 1 = 1
+        tl.add_trade(timestamp=1200, side="b", price=101.0, volume=0.5)
+        # Trade above best_ask: delta = (102 - 100) / 1 = 2
+        tl.add_trade(timestamp=1300, side="b", price=102.0, volume=0.5)
+
+        buckets = tl.gueant.buckets("a")
+
+        # Verify delta values
+        deltas = set(buckets["delta"].values)
+        assert 0 in deltas
+        assert 1 in deltas
+        assert 2 in deltas
+
+        # Verify N(delta) counts
+        delta_0 = buckets[buckets["delta"] == 0]
+        delta_1 = buckets[buckets["delta"] == 1]
+        delta_2 = buckets[buckets["delta"] == 2]
+
+        assert delta_0.iloc[0]["N"] == 1
+        assert delta_1.iloc[0]["N"] == 1
+        assert delta_2.iloc[0]["N"] == 1
+
+    def test_bid_delta_calculation(self):
+        """Test delta calculation for bid side: δ = (best_ask - trade_price) / tick_size."""
+        tl = TL(tick_size=1.0)
+        tl.add_lob_snapshot(timestamp=1000, bids=[(100.0, 10.0)], asks=[(101.0, 8.0)])
+
+        # Trade at best_ask: delta = 0
+        tl.add_trade(timestamp=1100, side="s", price=101.0, volume=0.5)
+        # Trade at best_bid: delta = (101 - 100) / 1 = 1
+        tl.add_trade(timestamp=1200, side="s", price=100.0, volume=0.5)
+        # Trade below best_bid: delta = (101 - 99) / 1 = 2
+        tl.add_trade(timestamp=1300, side="s", price=99.0, volume=0.5)
+
+        buckets = tl.gueant.buckets("b")
+
+        # Verify delta values
+        deltas = set(buckets["delta"].values)
+        assert 0 in deltas
+        assert 1 in deltas
+        assert 2 in deltas
+
+        # Verify N(delta) counts
+        delta_0 = buckets[buckets["delta"] == 0]
+        delta_1 = buckets[buckets["delta"] == 1]
+        delta_2 = buckets[buckets["delta"] == 2]
+
+        assert delta_0.iloc[0]["N"] == 1
+        assert delta_1.iloc[0]["N"] == 1
+        assert delta_2.iloc[0]["N"] == 1
+
+    def test_tick_size_affects_delta_rounding(self):
+        """Test that tick_size affects delta calculation with rounding."""
+        tl = TL(tick_size=0.5)
+        tl.add_lob_snapshot(timestamp=1000, bids=[(100.0, 10.0)], asks=[(101.0, 8.0)])
+
+        # Trade at 101.0: delta = (101 - 100) / 0.5 = 2
+        tl.add_trade(timestamp=1100, side="b", price=101.0, volume=0.5)
+
+        buckets = tl.gueant.buckets("a")
+        assert 2 in buckets["delta"].values
+
+    def test_n_delta_counts_trades_correctly(self):
+        """Test that N(δ) correctly counts trades at each delta."""
+        tl = TL(tick_size=1.0)
+        tl.add_lob_snapshot(timestamp=1000, bids=[(100.0, 10.0)], asks=[(101.0, 8.0)])
+        tl.add_lob_snapshot(timestamp=2000, bids=[(100.0, 10.0)], asks=[(101.0, 8.0)])
+        tl.add_lob_snapshot(timestamp=3000, bids=[(100.0, 10.0)], asks=[(101.0, 8.0)])
+
+        # Multiple trades at delta=1 (at best_ask)
+        tl.add_trade(timestamp=1100, side="b", price=101.0, volume=0.5)
+        tl.add_trade(timestamp=1500, side="b", price=101.0, volume=0.5)
+        tl.add_trade(timestamp=2100, side="b", price=101.0, volume=0.5)
+
+        buckets = tl.gueant.buckets("a")
+        delta_1 = buckets[buckets["delta"] == 1]
+
+        assert len(delta_1) == 1
+        assert delta_1.iloc[0]["N"] == 3
+
+    def test_t_delta_calculates_duration_correctly(self):
+        """Test that T(δ) correctly calculates duration from LOB snapshots."""
+        tl = TL(tick_size=1.0)
+        tl.add_lob_snapshot(timestamp=1000, bids=[(100.0, 10.0)], asks=[(101.0, 8.0)])
+        tl.add_lob_snapshot(timestamp=2000, bids=[(100.0, 10.0)], asks=[(101.0, 8.0)])
+        tl.add_lob_snapshot(timestamp=3000, bids=[(100.0, 10.0)], asks=[(101.0, 8.0)])
+
+        buckets = tl.gueant.buckets("a")
+
+        # Delta=1 corresponds to ask price 101.0
+        delta_1 = buckets[buckets["delta"] == 1]
+
+        # Total duration: (2000-1000) + (3000-2000) = 2000
+        assert len(delta_1) == 1
+        assert delta_1.iloc[0]["T"] == 2000.0
+
+    def test_t_delta_multiple_levels(self):
+        """Test T(δ) with multiple price levels."""
+        tl = TL(tick_size=1.0)
+        tl.add_lob_snapshot(
+            timestamp=1000,
+            bids=[(100.0, 10.0)],
+            asks=[(101.0, 8.0), (102.0, 6.0), (103.0, 4.0)],
+        )
+        tl.add_lob_snapshot(
+            timestamp=2000,
+            bids=[(100.0, 10.0)],
+            asks=[(101.0, 8.0), (102.0, 6.0), (103.0, 4.0)],
+        )
+        tl.add_trade(timestamp=2500, side="b", price=101.0, volume=0.5)
+
+        buckets = tl.gueant.buckets("a")
+
+        # Delta=1: ask at 101.0, duration from 1000 to 2500 = 1500
+        # Delta=2: ask at 102.0, duration from 1000 to 2500 = 1500
+        # Delta=3: ask at 103.0, duration from 1000 to 2500 = 1500
+        delta_1 = buckets[buckets["delta"] == 1]
+        delta_2 = buckets[buckets["delta"] == 2]
+        delta_3 = buckets[buckets["delta"] == 3]
+
+        assert len(delta_1) == 1
+        assert delta_1.iloc[0]["T"] == 1500.0
+        assert len(delta_2) == 1
+        assert delta_2.iloc[0]["T"] == 1500.0
+        assert len(delta_3) == 1
+        assert delta_3.iloc[0]["T"] == 1500.0
+
+    def test_lambda_calculated_correctly(self):
+        """Test that λ(δ) = N(δ) / T(δ) is calculated correctly."""
+        tl = TL(tick_size=1.0)
+        tl.add_lob_snapshot(timestamp=1000, bids=[(100.0, 10.0)], asks=[(101.0, 8.0)])
+        tl.add_lob_snapshot(timestamp=2000, bids=[(100.0, 10.0)], asks=[(101.0, 8.0)])
+
+        # Two trades at delta=1 over 1000 time units (from 1000 to 2000)
+        tl.add_trade(timestamp=1100, side="b", price=101.0, volume=0.5)
+        tl.add_trade(timestamp=1500, side="b", price=101.0, volume=0.5)
+
+        buckets = tl.gueant.buckets("a")
+        delta_1 = buckets[buckets["delta"] == 1].iloc[0]
+
+        # lambda = N / T = 2 / 1000 = 0.002
+        expected_lambda = 2.0 / 1000.0
+        assert abs(delta_1["lambda"] - expected_lambda) < 1e-10
+
+    def test_lambda_nan_when_t_zero(self):
+        """Test that λ(δ) is NaN when T(δ)=0."""
+        tl = TL(tick_size=1.0)
+
+        # Trade but no LOB snapshot (T=0)
+        tl.add_trade(timestamp=1000, side="b", price=101.0, volume=0.5)
+
+        buckets = tl.gueant.buckets("a")
+
+        # With no LOB, all rows should have T=0 and lambda=NaN
+        if len(buckets) > 0:
+            for _, row in buckets.iterrows():
+                if row["T"] == 0:
+                    assert pd.isna(row["lambda"])
+
+    def test_lambda_nan_when_n_zero(self):
+        """Test that λ(δ) is NaN when N(δ)=0."""
+        tl = TL(tick_size=1.0)
+        tl.add_lob_snapshot(timestamp=1000, bids=[(100.0, 10.0)], asks=[(101.0, 8.0)])
+        tl.add_lob_snapshot(timestamp=2000, bids=[(100.0, 10.0)], asks=[(101.0, 8.0)])
+
+        # No trades, only LOB (N=0, T>0)
+        buckets = tl.gueant.buckets("a")
+
+        # Delta=1 should have T>0 but N=0, so lambda=NaN
+        delta_1 = buckets[buckets["delta"] == 1]
+        if len(delta_1) > 0:
+            assert delta_1.iloc[0]["N"] == 0
+            assert delta_1.iloc[0]["T"] > 0
+            assert pd.isna(delta_1.iloc[0]["lambda"])
+
+    def test_fit_with_exponential_decay(self):
+        """Test fitting A and k with simple exponential decay data."""
+        tl = TL(tick_size=1.0)
+
+        # Create LOB that exposes liquidity at deltas 1, 2, 3, 4
+        tl.add_lob_snapshot(
+            timestamp=1000,
+            bids=[(100.0, 10.0)],
+            asks=[(101.0, 10.0), (102.0, 10.0), (103.0, 10.0), (104.0, 10.0)],
+        )
+        tl.add_lob_snapshot(
+            timestamp=2000,
+            bids=[(100.0, 10.0)],
+            asks=[(101.0, 10.0), (102.0, 10.0), (103.0, 10.0), (104.0, 10.0)],
+        )
+
+        # Add trades to create intensity function
+        # More trades at small deltas, fewer at large deltas
+        tl.add_trade(timestamp=1100, side="b", price=101.0, volume=0.5)  # delta=1
+        tl.add_trade(timestamp=1200, side="b", price=101.0, volume=0.5)  # delta=1
+        tl.add_trade(timestamp=1300, side="b", price=102.0, volume=0.5)  # delta=2
+        tl.add_trade(timestamp=1400, side="b", price=103.0, volume=0.5)  # delta=3
+
+        A, k = tl.gueant.ask()
+
+        # A should be positive
+        assert A > 0 or pd.isna(A)
+        # k should be positive (decay rate)
+        assert k > 0 or pd.isna(k)
+
+    def test_fit_returns_nan_with_insufficient_data(self):
+        """Test that fitting returns NaN with fewer than 2 valid points."""
+        tl = TL(tick_size=1.0)
+        tl.add_lob_snapshot(timestamp=1000, bids=[(100.0, 10.0)], asks=[(101.0, 8.0)])
+        tl.add_lob_snapshot(timestamp=2000, bids=[(100.0, 10.0)], asks=[(101.0, 8.0)])
+
+        # Only one trade (insufficient for fitting)
+        tl.add_trade(timestamp=1100, side="b", price=101.0, volume=0.5)
+
+        A, k = tl.gueant.ask()
+
+        assert pd.isna(A)
+        assert pd.isna(k)
+
+    def test_trade_before_first_lob_skipped(self):
+        """Test that trades before first LOB are skipped."""
+        tl = TL(tick_size=1.0)
+
+        # Trade before any LOB
+        tl.add_trade(timestamp=1000, side="b", price=101.0, volume=0.5)
+        tl.add_lob_snapshot(timestamp=2000, bids=[(100.0, 10.0)], asks=[(101.0, 8.0)])
+
+        buckets = tl.gueant.buckets("a")
+
+        # Trade should be skipped (no LOB at timestamp 1000)
+        total_n = buckets["N"].sum()
+        assert total_n == 0
+
+    def test_trade_with_invalid_best_price_skipped(self):
+        """Test that trades with invalid best prices are skipped."""
+        tl = TL(tick_size=1.0)
+
+        # LOB with zero/negative best bid
+        tl.add_lob_snapshot(timestamp=1000, bids=[(0.0, 10.0)], asks=[(101.0, 8.0)])
+        tl.add_trade(timestamp=1100, side="b", price=101.0, volume=0.5)
+
+        buckets = tl.gueant.buckets("a")
+
+        # Trade should be skipped due to invalid best_bid
+        total_n = buckets["N"].sum()
+        assert total_n == 0
+
+    def test_t_duration_with_varying_intervals(self):
+        """Test T(δ) calculation with varying time intervals."""
+        tl = TL(tick_size=1.0)
+        tl.add_lob_snapshot(timestamp=1000, bids=[(100.0, 10.0)], asks=[(101.0, 8.0)])
+        tl.add_lob_snapshot(timestamp=1500, bids=[(100.0, 10.0)], asks=[(101.0, 8.0)])  # 500
+        tl.add_lob_snapshot(timestamp=2000, bids=[(100.0, 10.0)], asks=[(101.0, 8.0)])  # 500
+        tl.add_lob_snapshot(timestamp=3000, bids=[(100.0, 10.0)], asks=[(101.0, 8.0)])  # 1000
+
+        buckets = tl.gueant.buckets("a")
+        delta_1 = buckets[buckets["delta"] == 1].iloc[0]
+
+        # Total duration: 500 + 500 + 1000 = 2000
+        assert delta_1["T"] == 2000.0
+
+    def test_delta_rounding(self):
+        """Test that delta is rounded to nearest integer."""
+        tl = TL(tick_size=0.5)
+        tl.add_lob_snapshot(timestamp=1000, bids=[(100.0, 10.0)], asks=[(101.0, 8.0)])
+
+        # Trade at 100.7: delta = (100.7 - 100) / 0.5 = 1.4 -> rounds to 1
+        tl.add_trade(timestamp=1100, side="b", price=100.7, volume=0.5)
+        # Trade at 100.8: delta = (100.8 - 100) / 0.5 = 1.6 -> rounds to 2
+        tl.add_trade(timestamp=1200, side="b", price=100.8, volume=0.5)
+
+        buckets = tl.gueant.buckets("a")
+        deltas = sorted(buckets["delta"].values)
+
+        assert 1 in deltas
+        assert 2 in deltas
+
+    def test_negative_delta_excluded(self):
+        """Test that negative deltas are excluded."""
+        tl = TL(tick_size=1.0)
+        tl.add_lob_snapshot(timestamp=1000, bids=[(100.0, 10.0)], asks=[(101.0, 8.0)])
+
+        # Trade below best_bid: delta = (99 - 100) / 1 = -1 -> should be excluded
+        tl.add_trade(timestamp=1100, side="b", price=99.0, volume=0.5)
+
+        buckets = tl.gueant.buckets("a")
+
+        # Negative delta should not appear in buckets
+        deltas = buckets["delta"].values
+        assert -1 not in deltas
+
+    def test_multiple_lob_snapshots_accumulate_t(self):
+        """Test that multiple LOB snapshots accumulate T(δ) correctly."""
+        tl = TL(tick_size=1.0)
+
+        # First snapshot: asks at 101, 102, 103
+        tl.add_lob_snapshot(
+            timestamp=1000,
+            bids=[(100.0, 10.0)],
+            asks=[(101.0, 10.0), (102.0, 10.0), (103.0, 10.0)],
+        )
+
+        # Second snapshot: asks at 101, 103 (102 removed)
+        tl.add_lob_snapshot(
+            timestamp=2000,
+            bids=[(100.0, 10.0)],
+            asks=[(101.0, 10.0), (103.0, 10.0)],
+        )
+
+        buckets = tl.gueant.buckets("a")
+
+        delta_1 = buckets[buckets["delta"] == 1].iloc[0]  # ask at 101.0
+        delta_2 = buckets[buckets["delta"] == 2].iloc[0]  # ask at 102.0
+        delta_3 = buckets[buckets["delta"] == 3].iloc[0]  # ask at 103.0
+
+        # Delta 1: present in both snapshots, duration = 1000 + (end-2000)
+        # Delta 2: only in first snapshot, duration = 1000
+        # Delta 3: present in both snapshots
+        assert delta_1["T"] > 0
+        assert delta_2["T"] > 0
+        assert delta_3["T"] > 0
+
+    def test_trade_side_mapping(self):
+        """Test that trade sides are correctly mapped for buckets calculation."""
+        tl = TL(tick_size=1.0)
+        tl.add_lob_snapshot(timestamp=1000, bids=[(100.0, 10.0)], asks=[(101.0, 8.0)])
+
+        # Buy aggressor trades (side='b') -> should appear in ask buckets
+        tl.add_trade(timestamp=1100, side="b", price=101.0, volume=0.5)
+        tl.add_trade(timestamp=1200, side="b", price=101.0, volume=0.5)
+
+        # Sell aggressor trades (side='s') -> should appear in bid buckets
+        tl.add_trade(timestamp=1300, side="s", price=100.0, volume=0.5)
+        tl.add_trade(timestamp=1400, side="s", price=100.0, volume=0.5)
+
+        ask_buckets = tl.gueant.buckets("a")
+        bid_buckets = tl.gueant.buckets("b")
+
+        # Ask buckets should have trades from side='b'
+        total_ask_n = ask_buckets["N"].sum()
+        # Bid buckets should have trades from side='s'
+        total_bid_n = bid_buckets["N"].sum()
+
+        assert total_ask_n == 2
+        assert total_bid_n == 2
+
+    def test_end_timestamp_calculation(self):
+        """Test that end timestamp for T(δ) calculation includes last event."""
+        tl = TL(tick_size=1.0)
+        tl.add_lob_snapshot(timestamp=1000, bids=[(100.0, 10.0)], asks=[(101.0, 8.0)])
+        tl.add_trade(timestamp=2500, side="b", price=101.0, volume=0.5)
+
+        buckets = tl.gueant.buckets("a")
+        delta_1 = buckets[buckets["delta"] == 1].iloc[0]
+
+        # Duration should extend to last event (trade at 2500)
+        assert delta_1["T"] == 1500.0  # 2500 - 1000
+
+
+class TestTLRepr:
+    """Test TL __repr__ method."""
+
+    def test_repr_empty_tl(self):
+        """Test __repr__ on empty TL."""
+        tl = TL(name="test-tl")
+        repr_str = repr(tl)
+
+        assert "TL" in repr_str
+        assert "test-tl" in repr_str
+        assert "lob_snapshots=0" in repr_str
+        assert "trades=0" in repr_str
+
+    def test_repr_with_data(self):
+        """Test __repr__ with data."""
+        tl = TL(name="BTC-USD")
+        tl.add_lob_snapshot(timestamp=1000, bids=[(100.0, 1.5)], asks=[(101.0, 2.1)])
+        tl.add_trade(timestamp=1150, side="b", price=101.0, volume=0.5)
+
+        repr_str = repr(tl)
+
+        assert "TL" in repr_str
+        assert "BTC-USD" in repr_str
+        assert "lob_snapshots=1" in repr_str
+        assert "trades=1" in repr_str
+
+
+class TestTLSliceInvalid:
+    """Test TL slicing with invalid inputs."""
+
+    def test_slice_with_integer(self):
+        """Test slicing with integer instead of slice."""
+        tl = TL()
+        tl.add_lob_snapshot(timestamp=1000, bids=[(100.0, 1.5)], asks=[(101.0, 2.1)])
+
+        try:
+            _ = tl[1000]
+            assert False, "Should have raised TypeError"
+        except TypeError as e:
+            assert "slice" in str(e)
+
+    def test_slice_with_string(self):
+        """Test slicing with string instead of slice."""
+        tl = TL()
+        tl.add_lob_snapshot(timestamp=1000, bids=[(100.0, 1.5)], asks=[(101.0, 2.1)])
+
+        try:
+            _ = tl["1000:2000"]
+            assert False, "Should have raised TypeError"
+        except TypeError as e:
+            assert "slice" in str(e)
+
+
+class TestTLLOBMode:
+    """Test TL with different lob_mode settings."""
+
+    def test_lob_mode_delta(self):
+        """Test TL with lob_mode='delta'."""
+        tl = TL(lob_mode="delta")
+        assert tl.lob_mode == "delta"
+
+        tl.add_lob_snapshot(timestamp=1000, bids=[(100.0, 1.5)], asks=[(101.0, 2.1)])
+        tl.add_lob_update(timestamp=1100, updates=[("b", 100.0, 2.0)])
+
+        assert tl.lob[1000] is not None
+        assert tl.lob[1100] is not None
+
+    def test_lob_mode_snapshot(self):
+        """Test TL with lob_mode='snapshot'."""
+        tl = TL(lob_mode="snapshot")
+        assert tl.lob_mode == "snapshot"
+
+        tl.add_lob_snapshot(timestamp=1000, bids=[(100.0, 1.5)], asks=[(101.0, 2.1)])
+        tl.add_lob_update(timestamp=1100, updates=[("b", 100.0, 2.0)])
+
+        assert tl.lob[1000] is not None
+        assert tl.lob[1100] is not None
+
+    def test_lob_mode_slicing_preserves_mode(self):
+        """Test that slicing preserves lob_mode."""
+        tl = TL(lob_mode="snapshot", name="test")
+        tl.add_lob_snapshot(timestamp=1000, bids=[(100.0, 1.5)], asks=[(101.0, 2.1)])
+        tl.add_lob_update(timestamp=2000, updates=[("b", 100.0, 2.0)])
+
+        sliced = tl[1000:2000]
+
+        assert sliced.lob_mode == "snapshot"
+
+
+class TestTLUpdateType:
+    """Test TL with different update_type settings."""
+
+    def test_update_type_realtime(self):
+        """Test TL with update_type='realtime'."""
+        tl = TL(update_type="realtime")
+        assert tl.update_type == "realtime"
+
+    def test_update_type_fixed(self):
+        """Test TL with update_type='fixed'."""
+        tl = TL(update_type="fixed")
+        assert tl.update_type == "fixed"
+
+    def test_update_type_slicing_preserves_type(self):
+        """Test that slicing preserves update_type."""
+        tl = TL(update_type="fixed", name="test")
+        tl.add_lob_snapshot(timestamp=1000, bids=[(100.0, 1.5)], asks=[(101.0, 2.1)])
+
+        sliced = tl[1000:2000]
+
+        assert sliced.update_type == "fixed"
+
+
+class TestTLEmptyLOB:
+    """Test TL with empty LOB data."""
+
+    def test_empty_bids_and_asks(self):
+        """Test adding LOB snapshot with empty bids and asks."""
+        tl = TL()
+        tl.add_lob_snapshot(timestamp=1000, bids=[], asks=[])
+
+        assert tl.lob[1000] is not None
+
+    def test_empty_bids_only(self):
+        """Test adding LOB snapshot with empty bids."""
+        tl = TL()
+        tl.add_lob_snapshot(timestamp=1000, bids=[], asks=[(101.0, 2.1)])
+
+        lob = tl.lob[1000]
+        assert len(lob._bids) == 0
+        assert len(lob._asks) > 0
+
+    def test_empty_asks_only(self):
+        """Test adding LOB snapshot with empty asks."""
+        tl = TL()
+        tl.add_lob_snapshot(timestamp=1000, bids=[(100.0, 1.5)], asks=[])
+
+        lob = tl.lob[1000]
+        assert len(lob._bids) > 0
+        assert len(lob._asks) == 0
+
+
+class TestTLTradeVariations:
+    """Test TL with various trade scenarios."""
+
+    def test_trade_zero_volume(self):
+        """Test adding trade with zero volume."""
+        tl = TL()
+        tl.add_trade(timestamp=1000, side="b", price=101.0, volume=0.0)
+
+        assert len(tl.trades) == 1
+        assert tl.trades[0].volume == 0.0
+
+    def test_trade_negative_price(self):
+        """Test adding trade with negative price."""
+        tl = TL()
+        tl.add_trade(timestamp=1000, side="b", price=-100.0, volume=1.0)
+
+        assert len(tl.trades) == 1
+        assert tl.trades[0].price == -100.0
+
+    def test_trade_case_sensitivity(self):
+        """Test that side values are case-sensitive."""
+        tl = TL()
+        tl.add_trade(timestamp=1000, side="B", price=101.0, volume=0.5)
+        tl.add_trade(timestamp=1100, side="S", price=100.0, volume=0.5)
+
+        assert len(tl.trades) == 2
+        assert tl.trades[0].side == "B"
+        assert tl.trades[1].side == "S"
+
+
+class TestTLRollingEdgeCases:
+    """Test TL rolling with edge cases."""
+
+    def test_rolling_zero_window(self):
+        """Test rolling with zero window size."""
+        tl = TL()
+        tl.add_trade(timestamp=1000, side="b", price=101.0, volume=0.5)
+        tl.add_trade(timestamp=2000, side="s", price=100.0, volume=0.5)
+
+        windows = list(tl.rolling(0))
+
+        assert len(windows) == 2
+        for window in windows:
+            assert len(window) <= 1
+
+    def test_rolling_negative_window(self):
+        """Test rolling with negative window size."""
+        tl = TL()
+        tl.add_trade(timestamp=1000, side="b", price=101.0, volume=0.5)
+
+        windows = list(tl.rolling(-100))
+
+        assert len(windows) == 1
+
+    def test_rolling_very_large_window(self):
+        """Test rolling with very large window size."""
+        tl = TL()
+        tl.add_trade(timestamp=1000, side="b", price=101.0, volume=0.5)
+        tl.add_trade(timestamp=2000, side="s", price=100.0, volume=0.5)
+        tl.add_trade(timestamp=3000, side="b", price=101.0, volume=0.5)
+
+        windows = list(tl.rolling(1000000))
+
+        assert len(windows) == 3
+        # With very large window, earlier windows should accumulate more events
+        assert len(windows[0]) >= 1
+        assert len(windows[1]) >= 2
+        assert len(windows[2]) == 3
+
+
+class TestTLIterRows:
+    """Test TL _iter_rows method."""
+
+    def test_iter_rows_empty_tl(self):
+        """Test _iter_rows on empty TL."""
+        tl = TL()
+        rows = list(tl._iter_rows())
+
+        assert len(rows) == 0
+
+    def test_iter_rows_only_lob(self):
+        """Test _iter_rows with only LOB data."""
+        tl = TL()
+        tl.add_lob_snapshot(timestamp=1000, bids=[(100.0, 1.5)], asks=[(101.0, 2.1)])
+
+        rows = list(tl._iter_rows())
+
+        assert len(rows) == 2
+        assert rows[0][0] == 1000
+        assert rows[0][1] == "lob"
+
+    def test_iter_rows_only_trades(self):
+        """Test _iter_rows with only trades."""
+        tl = TL()
+        tl.add_trade(timestamp=1000, side="b", price=101.0, volume=0.5)
+
+        rows = list(tl._iter_rows())
+
+        assert len(rows) == 1
+        assert rows[0][0] == 1000
+        assert rows[0][1] == "trade"
+        assert rows[0][2] == "b"
+
+    def test_iter_rows_mixed(self):
+        """Test _iter_rows with mixed data."""
+        tl = TL()
+        tl.add_lob_snapshot(timestamp=1000, bids=[(100.0, 1.5)], asks=[(101.0, 2.1)])
+        tl.add_trade(timestamp=1500, side="b", price=101.0, volume=0.5)
+        tl.add_lob_update(timestamp=2000, updates=[("b", 100.0, 2.0)])
+
+        rows = list(tl._iter_rows())
+
+        # 2 from first LOB snapshot (bid + ask) + 1 trade + 2 from LOB update (bid + ask)
+        assert len(rows) == 5
+        assert rows[0][0] == 1000
+        assert rows[1][0] == 1000
+        assert rows[2][0] == 1500
+        assert rows[3][0] == 2000
+        assert rows[4][0] == 2000
+
+    def test_iter_rows_sorted_by_timestamp(self):
+        """Test that _iter_rows returns rows sorted by timestamp."""
+        tl = TL()
+        tl.add_trade(timestamp=2000, side="b", price=101.0, volume=0.5)
+        tl.add_lob_snapshot(timestamp=1000, bids=[(100.0, 1.5)], asks=[(101.0, 2.1)])
+        tl.add_trade(timestamp=1500, side="s", price=100.0, volume=0.5)
+
+        rows = list(tl._iter_rows())
+        timestamps = [row[0] for row in rows]
+
+        assert timestamps == sorted(timestamps)
+
+
+class TestTLOHLC:
+    """Test TL OHLC (Open, High, Low, Close) calculation."""
+
+    def test_ohlc_empty_tl(self):
+        """Test OHLC on empty TL returns empty DataFrame."""
+        tl = TL(timestamp_unit='s')
+        df = tl.ohlc('1s')
+
+        assert len(df) == 0
+        assert list(df.columns) == ["open", "high", "low", "close", "volume", "count"]
+
+    def test_ohlc_invalid_period(self):
+        """Test OHLC with invalid period raises ValueError."""
+        tl = TL(timestamp_unit='s')
+        tl.add_trade(timestamp=1000, side="b", price=101.0, volume=0.5)
+
+        with pytest.raises(ValueError, match="Unknown period"):
+            tl.ohlc('2s')
+
+    def test_ohlc_single_trade(self):
+        """Test OHLC with single trade."""
+        tl = TL(timestamp_unit='s')
+        tl.add_trade(timestamp=1000, side="b", price=101.0, volume=0.5)
+
+        df = tl.ohlc('1s')
+
+        assert len(df) == 1
+        candle = df.iloc[0]
+        assert candle.name == 1000  # bucket start
+        assert candle["open"] == 101.0
+        assert candle["high"] == 101.0
+        assert candle["low"] == 101.0
+        assert candle["close"] == 101.0
+        assert candle["volume"] == 0.5
+        assert candle["count"] == 1
+
+    def test_ohlc_multiple_trades_same_bucket(self):
+        """Test OHLC with multiple trades in same time bucket."""
+        tl = TL(timestamp_unit='ms')
+        # All trades within 1 second bucket (1000ms = 1s)
+        tl.add_trade(timestamp=1000, side="b", price=100.0, volume=0.5)
+        tl.add_trade(timestamp=1500, side="s", price=101.0, volume=0.3)
+        tl.add_trade(timestamp=1800, side="b", price=99.5, volume=0.4)
+        tl.add_trade(timestamp=1999, side="s", price=100.5, volume=0.2)
+
+        df = tl.ohlc('1s')
+
+        assert len(df) == 1
+        candle = df.iloc[0]
+        assert candle.name == 1000  # bucket start: (1000 // 1000) * 1000 = 1000
+        assert candle["open"] == 100.0  # first trade
+        assert candle["high"] == 101.0  # max
+        assert candle["low"] == 99.5  # min
+        assert candle["close"] == 100.5  # last trade
+        assert abs(candle["volume"] - 1.4) < 1e-10  # sum
+        assert candle["count"] == 4
+
+    def test_ohlc_multiple_buckets(self):
+        """Test OHLC with trades in different time buckets."""
+        tl = TL(timestamp_unit='s')
+        # Trades in different 1-second buckets
+        tl.add_trade(timestamp=1000, side="b", price=100.0, volume=0.5)
+        tl.add_trade(timestamp=2000, side="b", price=102.0, volume=0.4)
+        tl.add_trade(timestamp=3000, side="b", price=104.0, volume=0.6)
+
+        df = tl.ohlc('1s')
+
+        assert len(df) == 3
+        assert 1000 in df.index
+        assert 2000 in df.index
+        assert 3000 in df.index
+
+        # Each bucket has one trade
+        assert df.loc[1000, "count"] == 1
+        assert df.loc[2000, "count"] == 1
+        assert df.loc[3000, "count"] == 1
+
+    def test_ohlc_1s_period(self):
+        """Test OHLC with 1s period."""
+        tl = TL(timestamp_unit='s')
+        # Trades spanning 3 seconds
+        tl.add_trade(timestamp=1000, side="b", price=100.0, volume=0.5)
+        tl.add_trade(timestamp=2000, side="b", price=102.0, volume=0.4)
+        tl.add_trade(timestamp=3000, side="b", price=104.0, volume=0.6)
+
+        df = tl.ohlc('1s')
+
+        assert len(df) == 3
+        assert 1000 in df.index
+        assert 2000 in df.index
+        assert 3000 in df.index
+
+    def test_ohlc_15m_period(self):
+        """Test OHLC with 15m period."""
+        tl = TL(timestamp_unit='s')
+        # Trades spanning 45 minutes
+        tl.add_trade(timestamp=0, side="b", price=100.0, volume=0.5)
+        tl.add_trade(timestamp=900, side="s", price=101.0, volume=0.3)
+        tl.add_trade(timestamp=1800, side="b", price=102.0, volume=0.4)
+
+        df = tl.ohlc('15m')
+
+        # 15m buckets: [0-900), [900-1800), [1800-2700)
+        assert len(df) == 3
+        assert 0 in df.index
+        assert 900 in df.index
+        assert 1800 in df.index
+
+    def test_ohlc_1h_period(self):
+        """Test OHLC with 1h period."""
+        tl = TL(timestamp_unit='s')
+        # Trades spanning 2 hours
+        tl.add_trade(timestamp=0, side="b", price=100.0, volume=0.5)
+        tl.add_trade(timestamp=3600, side="s", price=101.0, volume=0.3)
+        tl.add_trade(timestamp=7200, side="b", price=102.0, volume=0.4)
+
+        df = tl.ohlc('1h')
+
+        # 1h buckets: [0-3600), [3600-7200), [7200-10800)
+        assert len(df) == 3
+        assert 0 in df.index
+        assert 3600 in df.index
+        assert 7200 in df.index
+
+    def test_ohlc_24h_period(self):
+        """Test OHLC with 24h period."""
+        tl = TL(timestamp_unit='s')
+        # Trades spanning 2 days
+        tl.add_trade(timestamp=0, side="b", price=100.0, volume=0.5)
+        tl.add_trade(timestamp=86400, side="s", price=101.0, volume=0.3)
+
+        df = tl.ohlc('24h')
+
+        # 24h buckets: [0-86400), [86400-172800)
+        assert len(df) == 2
+        assert 0 in df.index
+        assert 86400 in df.index
+
+    def test_ohlc_volume_calculation(self):
+        """Test OHLC volume is correctly summed."""
+        tl = TL(timestamp_unit='s')
+        tl.add_trade(timestamp=1000, side="b", price=100.0, volume=0.5)
+        tl.add_trade(timestamp=1001, side="s", price=101.0, volume=0.3)
+        tl.add_trade(timestamp=1002, side="b", price=99.5, volume=0.4)
+        tl.add_trade(timestamp=2000, side="s", price=102.0, volume=0.2)
+
+        df = tl.ohlc('1s')
+
+        # With 1s period and second timestamps, each timestamp is its own bucket
+        assert df.loc[1000, "volume"] == 0.5
+        assert df.loc[1001, "volume"] == 0.3
+        assert df.loc[1002, "volume"] == 0.4
+        assert df.loc[2000, "volume"] == 0.2
+
+    def test_ohlc_count_calculation(self):
+        """Test OHLC count is correctly calculated."""
+        tl = TL(timestamp_unit='s')
+        tl.add_trade(timestamp=1000, side="b", price=100.0, volume=0.5)
+        tl.add_trade(timestamp=1001, side="s", price=101.0, volume=0.3)
+        tl.add_trade(timestamp=1002, side="b", price=99.5, volume=0.4)
+        tl.add_trade(timestamp=2000, side="s", price=102.0, volume=0.2)
+
+        df = tl.ohlc('1s')
+
+        # Each timestamp is its own bucket
+        assert df.loc[1000, "count"] == 1
+        assert df.loc[1001, "count"] == 1
+        assert df.loc[1002, "count"] == 1
+        assert df.loc[2000, "count"] == 1
+
+    def test_ohlc_open_is_first_trade(self):
+        """Test OHLC open is first trade price in bucket."""
+        tl = TL(timestamp_unit='s')
+        tl.add_trade(timestamp=1000, side="b", price=101.0, volume=0.5)
+        tl.add_trade(timestamp=1001, side="s", price=100.0, volume=0.3)
+        tl.add_trade(timestamp=1002, side="b", price=99.5, volume=0.4)
+
+        df = tl.ohlc('1s')
+        candle = df.iloc[0]
+
+        assert candle["open"] == 101.0  # first trade
+
+    def test_ohlc_close_is_last_trade(self):
+        """Test OHLC close is last trade price in bucket."""
+        tl = TL(timestamp_unit='ms')
+        tl.add_trade(timestamp=1000, side="b", price=101.0, volume=0.5)
+        tl.add_trade(timestamp=1500, side="s", price=100.0, volume=0.3)
+        tl.add_trade(timestamp=1800, side="b", price=99.5, volume=0.4)
+
+        df = tl.ohlc('1s')
+        candle = df.iloc[0]
+
+        assert candle["close"] == 99.5  # last trade
+
+    def test_ohlc_high_is_max_price(self):
+        """Test OHLC high is maximum price in bucket."""
+        tl = TL(timestamp_unit='ms')
+        tl.add_trade(timestamp=1000, side="b", price=101.0, volume=0.5)
+        tl.add_trade(timestamp=1200, side="s", price=100.0, volume=0.3)
+        tl.add_trade(timestamp=1400, side="b", price=103.0, volume=0.4)
+        tl.add_trade(timestamp=1800, side="s", price=102.0, volume=0.2)
+
+        df = tl.ohlc('1s')
+        candle = df.iloc[0]
+
+        assert candle["high"] == 103.0
+
+    def test_ohlc_low_is_min_price(self):
+        """Test OHLC low is minimum price in bucket."""
+        tl = TL(timestamp_unit='ms')
+        tl.add_trade(timestamp=1000, side="b", price=101.0, volume=0.5)
+        tl.add_trade(timestamp=1200, side="s", price=100.0, volume=0.3)
+        tl.add_trade(timestamp=1400, side="b", price=98.0, volume=0.4)
+        tl.add_trade(timestamp=1800, side="s", price=99.0, volume=0.2)
+
+        df = tl.ohlc('1s')
+        candle = df.iloc[0]
+
+        assert candle["low"] == 98.0
+
+    def test_ohlc_timestamp_unit_ns(self):
+        """Test OHLC with nanosecond timestamps."""
+        tl = TL(timestamp_unit='ns')
+        # Trades within 1 nanosecond bucket
+        tl.add_trade(timestamp=1_000_000_000, side="b", price=100.0, volume=0.5)
+        tl.add_trade(timestamp=1_000_000_001, side="s", price=101.0, volume=0.3)
+
+        df = tl.ohlc('1s')
+
+        # 1s = 1_000_000_000 ns
+        # Both trades in bucket 1_000_000_000
+        assert len(df) == 1
+        assert df.index[0] == 1_000_000_000
+
+    def test_ohlc_timestamp_unit_ms(self):
+        """Test OHLC with millisecond timestamps."""
+        tl = TL(timestamp_unit='ms')
+        # Trades within 1 millisecond bucket
+        tl.add_trade(timestamp=1000, side="b", price=100.0, volume=0.5)
+        tl.add_trade(timestamp=1001, side="s", price=101.0, volume=0.3)
+
+        df = tl.ohlc('1s')
+
+        # 1s = 1000 ms
+        # Both trades in bucket 1000
+        assert len(df) == 1
+        assert df.index[0] == 1000
+
+    def test_ohlc_timestamp_unit_us(self):
+        """Test OHLC with microsecond timestamps."""
+        tl = TL(timestamp_unit='us')
+        # Trades within 1 microsecond bucket
+        tl.add_trade(timestamp=1_000_000, side="b", price=100.0, volume=0.5)
+        tl.add_trade(timestamp=1_000_001, side="s", price=101.0, volume=0.3)
+
+        df = tl.ohlc('1s')
+
+        # 1s = 1_000_000 us
+        # Both trades in bucket 1_000_000
+        assert len(df) == 1
+        assert df.index[0] == 1_000_000
+
+    def test_ohlc_trades_at_bucket_boundary(self):
+        """Test OHLC with trades at exact bucket boundary."""
+        tl = TL(timestamp_unit='s')
+        # Trades at bucket boundaries
+        tl.add_trade(timestamp=999, side="b", price=99.0, volume=0.5)  # bucket 0
+        tl.add_trade(timestamp=1000, side="s", price=100.0, volume=0.3)  # bucket 1000
+        tl.add_trade(timestamp=1999, side="b", price=101.0, volume=0.4)  # bucket 1000
+        tl.add_trade(timestamp=2000, side="s", price=102.0, volume=0.2)  # bucket 2000
+
+        df = tl.ohlc('1s')
+
+        # Bucket 999: (999 // 1) * 1 = 999
+        # Bucket 1000: (1000 // 1) * 1 = 1000
+        # Bucket 1999: (1999 // 1) * 1 = 1999
+        # Bucket 2000: (2000 // 1) * 1 = 2000
+        assert 999 in df.index
+        assert 1000 in df.index
+        assert 1999 in df.index
+        assert 2000 in df.index
+
+    def test_ohlc_unordered_trades(self):
+        """Test OHLC with trades added in non-chronological order."""
+        tl = TL(timestamp_unit='s')
+        # Add trades out of order
+        tl.add_trade(timestamp=2000, side="b", price=103.0, volume=0.4)
+        tl.add_trade(timestamp=1000, side="b", price=101.0, volume=0.5)
+        tl.add_trade(timestamp=3000, side="s", price=104.0, volume=0.6)
+        tl.add_trade(timestamp=2001, side="s", price=102.0, volume=0.2)
+
+        df = tl.ohlc('1s')
+
+        # Should be indexed by bucket start timestamp
+        assert 1000 in df.index
+        assert 2000 in df.index
+        assert 2001 in df.index
+        assert 3000 in df.index
+
+        # Bucket 1000: only trade at 1000
+        assert df.loc[1000, "open"] == 101.0
+        assert df.loc[1000, "close"] == 101.0
+
+        # Bucket 2000: trade at 2000 only
+        assert df.loc[2000, "open"] == 103.0
+        assert df.loc[2000, "close"] == 103.0
+
+        # Bucket 2001: trade at 2001 only
+        assert df.loc[2001, "open"] == 102.0
+        assert df.loc[2001, "close"] == 102.0
+
+    def test_ohlc_gaps_in_data(self):
+        """Test OHLC with gaps in trade data."""
+        tl = TL(timestamp_unit='s')
+        tl.add_trade(timestamp=1000, side="b", price=100.0, volume=0.5)
+        tl.add_trade(timestamp=5000, side="s", price=101.0, volume=0.3)
+        tl.add_trade(timestamp=10000, side="b", price=102.0, volume=0.4)
+
+        df = tl.ohlc('1s')
+
+        # Should only create buckets for trades, not fill gaps
+        assert len(df) == 3
+        assert 1000 in df.index
+        assert 5000 in df.index
+        assert 10000 in df.index
+
+    def test_ohlc_all_accepted_periods(self):
+        """Test that all accepted periods work."""
+        tl = TL(timestamp_unit='s')
+        tl.add_trade(timestamp=1000, side="b", price=100.0, volume=0.5)
+
+        for period in ['1s', '5s', '1m', '15m', '1h', '24h']:
+            df = tl.ohlc(period)
+            assert isinstance(df, pd.DataFrame)
+            assert len(df) >= 1
+
+    def test_ohlc_index_name(self):
+        """Test OHLC DataFrame has correct index name."""
+        tl = TL(timestamp_unit='s')
+        tl.add_trade(timestamp=1000, side="b", price=100.0, volume=0.5)
+
+        df = tl.ohlc('1s')
+
+        assert df.index.name == "timestamp"
+
+    def test_ohlc_dataframe_columns(self):
+        """Test OHLC DataFrame has correct columns."""
+        tl = TL(timestamp_unit='s')
+        tl.add_trade(timestamp=1000, side="b", price=100.0, volume=0.5)
+
+        df = tl.ohlc('1s')
+
+        assert list(df.columns) == ["open", "high", "low", "close", "volume", "count"]
+
+    def test_ohlc_large_volume_single_bucket(self):
+        """Test OHLC with large volume in single bucket."""
+        tl = TL(timestamp_unit='ms')
+        tl.add_trade(timestamp=1000, side="b", price=100.0, volume=10.5)
+        tl.add_trade(timestamp=1500, side="s", price=101.0, volume=20.3)
+        tl.add_trade(timestamp=1800, side="b", price=99.5, volume=15.4)
+
+        df = tl.ohlc('1s')
+        candle = df.iloc[0]
+
+        assert abs(candle["volume"] - 46.2) < 1e-10
+
+    def test_ohlc_extreme_price_range(self):
+        """Test OHLC with extreme price range in bucket."""
+        tl = TL(timestamp_unit='ms')
+        tl.add_trade(timestamp=1000, side="b", price=1.0, volume=0.5)
+        tl.add_trade(timestamp=1500, side="s", price=10000.0, volume=0.3)
+        tl.add_trade(timestamp=1800, side="b", price=5000.0, volume=0.4)
+
+        df = tl.ohlc('1s')
+        candle = df.iloc[0]
+
+        assert candle["open"] == 1.0
+        assert candle["high"] == 10000.0
+        assert candle["low"] == 1.0
+        assert candle["close"] == 5000.0
+
+    def test_ohlc_same_price_multiple_trades(self):
+        """Test OHLC with same price for all trades in bucket."""
+        tl = TL(timestamp_unit='s')
+        tl.add_trade(timestamp=1000, side="b", price=100.0, volume=0.5)
+        tl.add_trade(timestamp=1001, side="s", price=100.0, volume=0.3)
+        tl.add_trade(timestamp=1002, side="b", price=100.0, volume=0.4)
+
+        df = tl.ohlc('1s')
+        candle = df.iloc[0]
+
+        assert candle["open"] == 100.0
+        assert candle["high"] == 100.0
+        assert candle["low"] == 100.0
+        assert candle["close"] == 100.0
 
 
 class TestTLIntegration:
