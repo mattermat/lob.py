@@ -140,9 +140,7 @@ class TestTLAddLOB:
     def test_add_lob_update_delete_level(self):
         """Test deleting level via update (quantity=0)."""
         tl = TL()
-        tl.add_lob_snapshot(
-            timestamp=1000, bids=[(100.0, 1.5), (99.5, 2.3)], asks=[(101.0, 2.1)]
-        )
+        tl.add_lob_snapshot(timestamp=1000, bids=[(100.0, 1.5), (99.5, 2.3)], asks=[(101.0, 2.1)])
 
         updates = [("b", 99.5, 0)]
         tl.add_lob_update(timestamp=1100, updates=updates)
@@ -1131,7 +1129,7 @@ class TestTLSlicing:
         tl.add_lob_update(timestamp=timestamps[9], updates=[("b", 100.00, 2.5)])
 
         # Slice from timestamp[7] to timestamp[9] like in the example
-        sliced = tl[timestamps[7]:timestamps[9]]
+        sliced = tl[timestamps[7] : timestamps[9]]
         arr = sliced.to_np()
 
         # Should include events at 1400, 1450, and 1500
@@ -2860,26 +2858,26 @@ class TestTLOHLC:
 
     def test_ohlc_empty_tl(self):
         """Test OHLC on empty TL returns empty DataFrame."""
-        tl = TL(timestamp_unit='s')
-        df = tl.ohlc('1s')
+        tl = TL(timestamp_unit="s")
+        df = tl.ohlc("1s")
 
         assert len(df) == 0
         assert list(df.columns) == ["open", "high", "low", "close", "volume", "count"]
 
     def test_ohlc_invalid_period(self):
         """Test OHLC with invalid period raises ValueError."""
-        tl = TL(timestamp_unit='s')
+        tl = TL(timestamp_unit="s")
         tl.add_trade(timestamp=1000, side="b", price=101.0, volume=0.5)
 
         with pytest.raises(ValueError, match="Unknown period"):
-            tl.ohlc('2s')
+            tl.ohlc("2s")
 
     def test_ohlc_single_trade(self):
         """Test OHLC with single trade."""
-        tl = TL(timestamp_unit='s')
+        tl = TL(timestamp_unit="s")
         tl.add_trade(timestamp=1000, side="b", price=101.0, volume=0.5)
 
-        df = tl.ohlc('1s')
+        df = tl.ohlc("1s")
 
         assert len(df) == 1
         candle = df.iloc[0]
@@ -2893,14 +2891,14 @@ class TestTLOHLC:
 
     def test_ohlc_multiple_trades_same_bucket(self):
         """Test OHLC with multiple trades in same time bucket."""
-        tl = TL(timestamp_unit='ms')
+        tl = TL(timestamp_unit="ms")
         # All trades within 1 second bucket (1000ms = 1s)
         tl.add_trade(timestamp=1000, side="b", price=100.0, volume=0.5)
         tl.add_trade(timestamp=1500, side="s", price=101.0, volume=0.3)
         tl.add_trade(timestamp=1800, side="b", price=99.5, volume=0.4)
         tl.add_trade(timestamp=1999, side="s", price=100.5, volume=0.2)
 
-        df = tl.ohlc('1s')
+        df = tl.ohlc("1s")
 
         assert len(df) == 1
         candle = df.iloc[0]
@@ -2914,13 +2912,13 @@ class TestTLOHLC:
 
     def test_ohlc_multiple_buckets(self):
         """Test OHLC with trades in different time buckets."""
-        tl = TL(timestamp_unit='s')
+        tl = TL(timestamp_unit="s")
         # Trades in different 1-second buckets
         tl.add_trade(timestamp=1000, side="b", price=100.0, volume=0.5)
         tl.add_trade(timestamp=2000, side="b", price=102.0, volume=0.4)
         tl.add_trade(timestamp=3000, side="b", price=104.0, volume=0.6)
 
-        df = tl.ohlc('1s')
+        df = tl.ohlc("1s")
 
         assert len(df) == 3
         assert 1000 in df.index
@@ -2934,13 +2932,13 @@ class TestTLOHLC:
 
     def test_ohlc_1s_period(self):
         """Test OHLC with 1s period."""
-        tl = TL(timestamp_unit='s')
+        tl = TL(timestamp_unit="s")
         # Trades spanning 3 seconds
         tl.add_trade(timestamp=1000, side="b", price=100.0, volume=0.5)
         tl.add_trade(timestamp=2000, side="b", price=102.0, volume=0.4)
         tl.add_trade(timestamp=3000, side="b", price=104.0, volume=0.6)
 
-        df = tl.ohlc('1s')
+        df = tl.ohlc("1s")
 
         assert len(df) == 3
         assert 1000 in df.index
@@ -2949,13 +2947,13 @@ class TestTLOHLC:
 
     def test_ohlc_15m_period(self):
         """Test OHLC with 15m period."""
-        tl = TL(timestamp_unit='s')
+        tl = TL(timestamp_unit="s")
         # Trades spanning 45 minutes
         tl.add_trade(timestamp=0, side="b", price=100.0, volume=0.5)
         tl.add_trade(timestamp=900, side="s", price=101.0, volume=0.3)
         tl.add_trade(timestamp=1800, side="b", price=102.0, volume=0.4)
 
-        df = tl.ohlc('15m')
+        df = tl.ohlc("15m")
 
         # 15m buckets: [0-900), [900-1800), [1800-2700)
         assert len(df) == 3
@@ -2965,13 +2963,13 @@ class TestTLOHLC:
 
     def test_ohlc_1h_period(self):
         """Test OHLC with 1h period."""
-        tl = TL(timestamp_unit='s')
+        tl = TL(timestamp_unit="s")
         # Trades spanning 2 hours
         tl.add_trade(timestamp=0, side="b", price=100.0, volume=0.5)
         tl.add_trade(timestamp=3600, side="s", price=101.0, volume=0.3)
         tl.add_trade(timestamp=7200, side="b", price=102.0, volume=0.4)
 
-        df = tl.ohlc('1h')
+        df = tl.ohlc("1h")
 
         # 1h buckets: [0-3600), [3600-7200), [7200-10800)
         assert len(df) == 3
@@ -2981,12 +2979,12 @@ class TestTLOHLC:
 
     def test_ohlc_24h_period(self):
         """Test OHLC with 24h period."""
-        tl = TL(timestamp_unit='s')
+        tl = TL(timestamp_unit="s")
         # Trades spanning 2 days
         tl.add_trade(timestamp=0, side="b", price=100.0, volume=0.5)
         tl.add_trade(timestamp=86400, side="s", price=101.0, volume=0.3)
 
-        df = tl.ohlc('24h')
+        df = tl.ohlc("24h")
 
         # 24h buckets: [0-86400), [86400-172800)
         assert len(df) == 2
@@ -2995,13 +2993,13 @@ class TestTLOHLC:
 
     def test_ohlc_volume_calculation(self):
         """Test OHLC volume is correctly summed."""
-        tl = TL(timestamp_unit='s')
+        tl = TL(timestamp_unit="s")
         tl.add_trade(timestamp=1000, side="b", price=100.0, volume=0.5)
         tl.add_trade(timestamp=1001, side="s", price=101.0, volume=0.3)
         tl.add_trade(timestamp=1002, side="b", price=99.5, volume=0.4)
         tl.add_trade(timestamp=2000, side="s", price=102.0, volume=0.2)
 
-        df = tl.ohlc('1s')
+        df = tl.ohlc("1s")
 
         # With 1s period and second timestamps, each timestamp is its own bucket
         assert df.loc[1000, "volume"] == 0.5
@@ -3011,13 +3009,13 @@ class TestTLOHLC:
 
     def test_ohlc_count_calculation(self):
         """Test OHLC count is correctly calculated."""
-        tl = TL(timestamp_unit='s')
+        tl = TL(timestamp_unit="s")
         tl.add_trade(timestamp=1000, side="b", price=100.0, volume=0.5)
         tl.add_trade(timestamp=1001, side="s", price=101.0, volume=0.3)
         tl.add_trade(timestamp=1002, side="b", price=99.5, volume=0.4)
         tl.add_trade(timestamp=2000, side="s", price=102.0, volume=0.2)
 
-        df = tl.ohlc('1s')
+        df = tl.ohlc("1s")
 
         # Each timestamp is its own bucket
         assert df.loc[1000, "count"] == 1
@@ -3027,62 +3025,62 @@ class TestTLOHLC:
 
     def test_ohlc_open_is_first_trade(self):
         """Test OHLC open is first trade price in bucket."""
-        tl = TL(timestamp_unit='s')
+        tl = TL(timestamp_unit="s")
         tl.add_trade(timestamp=1000, side="b", price=101.0, volume=0.5)
         tl.add_trade(timestamp=1001, side="s", price=100.0, volume=0.3)
         tl.add_trade(timestamp=1002, side="b", price=99.5, volume=0.4)
 
-        df = tl.ohlc('1s')
+        df = tl.ohlc("1s")
         candle = df.iloc[0]
 
         assert candle["open"] == 101.0  # first trade
 
     def test_ohlc_close_is_last_trade(self):
         """Test OHLC close is last trade price in bucket."""
-        tl = TL(timestamp_unit='ms')
+        tl = TL(timestamp_unit="ms")
         tl.add_trade(timestamp=1000, side="b", price=101.0, volume=0.5)
         tl.add_trade(timestamp=1500, side="s", price=100.0, volume=0.3)
         tl.add_trade(timestamp=1800, side="b", price=99.5, volume=0.4)
 
-        df = tl.ohlc('1s')
+        df = tl.ohlc("1s")
         candle = df.iloc[0]
 
         assert candle["close"] == 99.5  # last trade
 
     def test_ohlc_high_is_max_price(self):
         """Test OHLC high is maximum price in bucket."""
-        tl = TL(timestamp_unit='ms')
+        tl = TL(timestamp_unit="ms")
         tl.add_trade(timestamp=1000, side="b", price=101.0, volume=0.5)
         tl.add_trade(timestamp=1200, side="s", price=100.0, volume=0.3)
         tl.add_trade(timestamp=1400, side="b", price=103.0, volume=0.4)
         tl.add_trade(timestamp=1800, side="s", price=102.0, volume=0.2)
 
-        df = tl.ohlc('1s')
+        df = tl.ohlc("1s")
         candle = df.iloc[0]
 
         assert candle["high"] == 103.0
 
     def test_ohlc_low_is_min_price(self):
         """Test OHLC low is minimum price in bucket."""
-        tl = TL(timestamp_unit='ms')
+        tl = TL(timestamp_unit="ms")
         tl.add_trade(timestamp=1000, side="b", price=101.0, volume=0.5)
         tl.add_trade(timestamp=1200, side="s", price=100.0, volume=0.3)
         tl.add_trade(timestamp=1400, side="b", price=98.0, volume=0.4)
         tl.add_trade(timestamp=1800, side="s", price=99.0, volume=0.2)
 
-        df = tl.ohlc('1s')
+        df = tl.ohlc("1s")
         candle = df.iloc[0]
 
         assert candle["low"] == 98.0
 
     def test_ohlc_timestamp_unit_ns(self):
         """Test OHLC with nanosecond timestamps."""
-        tl = TL(timestamp_unit='ns')
+        tl = TL(timestamp_unit="ns")
         # Trades within 1 nanosecond bucket
         tl.add_trade(timestamp=1_000_000_000, side="b", price=100.0, volume=0.5)
         tl.add_trade(timestamp=1_000_000_001, side="s", price=101.0, volume=0.3)
 
-        df = tl.ohlc('1s')
+        df = tl.ohlc("1s")
 
         # 1s = 1_000_000_000 ns
         # Both trades in bucket 1_000_000_000
@@ -3091,12 +3089,12 @@ class TestTLOHLC:
 
     def test_ohlc_timestamp_unit_ms(self):
         """Test OHLC with millisecond timestamps."""
-        tl = TL(timestamp_unit='ms')
+        tl = TL(timestamp_unit="ms")
         # Trades within 1 millisecond bucket
         tl.add_trade(timestamp=1000, side="b", price=100.0, volume=0.5)
         tl.add_trade(timestamp=1001, side="s", price=101.0, volume=0.3)
 
-        df = tl.ohlc('1s')
+        df = tl.ohlc("1s")
 
         # 1s = 1000 ms
         # Both trades in bucket 1000
@@ -3105,12 +3103,12 @@ class TestTLOHLC:
 
     def test_ohlc_timestamp_unit_us(self):
         """Test OHLC with microsecond timestamps."""
-        tl = TL(timestamp_unit='us')
+        tl = TL(timestamp_unit="us")
         # Trades within 1 microsecond bucket
         tl.add_trade(timestamp=1_000_000, side="b", price=100.0, volume=0.5)
         tl.add_trade(timestamp=1_000_001, side="s", price=101.0, volume=0.3)
 
-        df = tl.ohlc('1s')
+        df = tl.ohlc("1s")
 
         # 1s = 1_000_000 us
         # Both trades in bucket 1_000_000
@@ -3119,14 +3117,14 @@ class TestTLOHLC:
 
     def test_ohlc_trades_at_bucket_boundary(self):
         """Test OHLC with trades at exact bucket boundary."""
-        tl = TL(timestamp_unit='s')
+        tl = TL(timestamp_unit="s")
         # Trades at bucket boundaries
         tl.add_trade(timestamp=999, side="b", price=99.0, volume=0.5)  # bucket 0
         tl.add_trade(timestamp=1000, side="s", price=100.0, volume=0.3)  # bucket 1000
         tl.add_trade(timestamp=1999, side="b", price=101.0, volume=0.4)  # bucket 1000
         tl.add_trade(timestamp=2000, side="s", price=102.0, volume=0.2)  # bucket 2000
 
-        df = tl.ohlc('1s')
+        df = tl.ohlc("1s")
 
         # Bucket 999: (999 // 1) * 1 = 999
         # Bucket 1000: (1000 // 1) * 1 = 1000
@@ -3139,14 +3137,14 @@ class TestTLOHLC:
 
     def test_ohlc_unordered_trades(self):
         """Test OHLC with trades added in non-chronological order."""
-        tl = TL(timestamp_unit='s')
+        tl = TL(timestamp_unit="s")
         # Add trades out of order
         tl.add_trade(timestamp=2000, side="b", price=103.0, volume=0.4)
         tl.add_trade(timestamp=1000, side="b", price=101.0, volume=0.5)
         tl.add_trade(timestamp=3000, side="s", price=104.0, volume=0.6)
         tl.add_trade(timestamp=2001, side="s", price=102.0, volume=0.2)
 
-        df = tl.ohlc('1s')
+        df = tl.ohlc("1s")
 
         # Should be indexed by bucket start timestamp
         assert 1000 in df.index
@@ -3168,12 +3166,12 @@ class TestTLOHLC:
 
     def test_ohlc_gaps_in_data(self):
         """Test OHLC with gaps in trade data."""
-        tl = TL(timestamp_unit='s')
+        tl = TL(timestamp_unit="s")
         tl.add_trade(timestamp=1000, side="b", price=100.0, volume=0.5)
         tl.add_trade(timestamp=5000, side="s", price=101.0, volume=0.3)
         tl.add_trade(timestamp=10000, side="b", price=102.0, volume=0.4)
 
-        df = tl.ohlc('1s')
+        df = tl.ohlc("1s")
 
         # Should only create buckets for trades, not fill gaps
         assert len(df) == 3
@@ -3183,52 +3181,52 @@ class TestTLOHLC:
 
     def test_ohlc_all_accepted_periods(self):
         """Test that all accepted periods work."""
-        tl = TL(timestamp_unit='s')
+        tl = TL(timestamp_unit="s")
         tl.add_trade(timestamp=1000, side="b", price=100.0, volume=0.5)
 
-        for period in ['1s', '5s', '1m', '15m', '1h', '24h']:
+        for period in ["1s", "5s", "1m", "15m", "1h", "24h"]:
             df = tl.ohlc(period)
             assert isinstance(df, pd.DataFrame)
             assert len(df) >= 1
 
     def test_ohlc_index_name(self):
         """Test OHLC DataFrame has correct index name."""
-        tl = TL(timestamp_unit='s')
+        tl = TL(timestamp_unit="s")
         tl.add_trade(timestamp=1000, side="b", price=100.0, volume=0.5)
 
-        df = tl.ohlc('1s')
+        df = tl.ohlc("1s")
 
         assert df.index.name == "timestamp"
 
     def test_ohlc_dataframe_columns(self):
         """Test OHLC DataFrame has correct columns."""
-        tl = TL(timestamp_unit='s')
+        tl = TL(timestamp_unit="s")
         tl.add_trade(timestamp=1000, side="b", price=100.0, volume=0.5)
 
-        df = tl.ohlc('1s')
+        df = tl.ohlc("1s")
 
         assert list(df.columns) == ["open", "high", "low", "close", "volume", "count"]
 
     def test_ohlc_large_volume_single_bucket(self):
         """Test OHLC with large volume in single bucket."""
-        tl = TL(timestamp_unit='ms')
+        tl = TL(timestamp_unit="ms")
         tl.add_trade(timestamp=1000, side="b", price=100.0, volume=10.5)
         tl.add_trade(timestamp=1500, side="s", price=101.0, volume=20.3)
         tl.add_trade(timestamp=1800, side="b", price=99.5, volume=15.4)
 
-        df = tl.ohlc('1s')
+        df = tl.ohlc("1s")
         candle = df.iloc[0]
 
         assert abs(candle["volume"] - 46.2) < 1e-10
 
     def test_ohlc_extreme_price_range(self):
         """Test OHLC with extreme price range in bucket."""
-        tl = TL(timestamp_unit='ms')
+        tl = TL(timestamp_unit="ms")
         tl.add_trade(timestamp=1000, side="b", price=1.0, volume=0.5)
         tl.add_trade(timestamp=1500, side="s", price=10000.0, volume=0.3)
         tl.add_trade(timestamp=1800, side="b", price=5000.0, volume=0.4)
 
-        df = tl.ohlc('1s')
+        df = tl.ohlc("1s")
         candle = df.iloc[0]
 
         assert candle["open"] == 1.0
@@ -3238,12 +3236,12 @@ class TestTLOHLC:
 
     def test_ohlc_same_price_multiple_trades(self):
         """Test OHLC with same price for all trades in bucket."""
-        tl = TL(timestamp_unit='s')
+        tl = TL(timestamp_unit="s")
         tl.add_trade(timestamp=1000, side="b", price=100.0, volume=0.5)
         tl.add_trade(timestamp=1001, side="s", price=100.0, volume=0.3)
         tl.add_trade(timestamp=1002, side="b", price=100.0, volume=0.4)
 
-        df = tl.ohlc('1s')
+        df = tl.ohlc("1s")
         candle = df.iloc[0]
 
         assert candle["open"] == 100.0
@@ -3271,9 +3269,7 @@ class TestTLIntegration:
     def test_sequential_lob_updates_and_trades(self):
         """Test sequence of LOB updates and trades."""
         tl = TL()
-        tl.add_lob_snapshot(
-            timestamp=1000, bids=[(100.0, 1.5)], asks=[(101.0, 2.1)]
-        )
+        tl.add_lob_snapshot(timestamp=1000, bids=[(100.0, 1.5)], asks=[(101.0, 2.1)])
         tl.add_lob_update(timestamp=1100, updates=[("b", 100.0, 2.0)])
         tl.add_trade(timestamp=1150, side="b", price=101.0, volume=0.5)
         tl.add_lob_update(timestamp=1200, updates=[("a", 101.0, 1.0)])
@@ -3287,9 +3283,7 @@ class TestTLIntegration:
     def test_multiple_trades_same_timestamp(self):
         """Test multiple trades at same timestamp."""
         tl = TL()
-        tl.add_lob_snapshot(
-            timestamp=1000, bids=[(100.0, 1.5)], asks=[(101.0, 2.1)]
-        )
+        tl.add_lob_snapshot(timestamp=1000, bids=[(100.0, 1.5)], asks=[(101.0, 2.1)])
         tl.add_trades(
             timestamp=1350,
             trades=[("b", 101.0, 0.3), ("b", 101.5, 0.2), ("s", 100.0, 0.5)],

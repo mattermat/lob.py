@@ -10,12 +10,12 @@ from .lobts import LOBts
 
 # Mapping from period string to seconds
 _OHLC_PERIODS = {
-    '1s':  1,
-    '5s':  5,
-    '1m':  60,
-    '15m': 900,
-    '1h':  3_600,
-    '24h': 86_400,
+    "1s": 1,
+    "5s": 5,
+    "1m": 60,
+    "15m": 900,
+    "1h": 3_600,
+    "24h": 86_400,
 }
 
 _DEFAULT_NUM_BUCKETS = 50
@@ -47,7 +47,7 @@ def _fill_buckets(trades, bucket_size, include_partial=False):
         vol = trade.volume
         while vol > 0:
             fill = min(vol, remaining)
-            if trade.side == 'b':
+            if trade.side == "b":
                 current_buy += fill
             else:
                 current_sell += fill
@@ -89,14 +89,14 @@ def _realized_vol(trades):
         return float("nan")
     prices = [t.price for t in sorted(trades, key=lambda t: t.timestamp)]
     log_returns = np.diff(np.log(prices))
-    return float(np.sqrt(np.sum(log_returns ** 2)))
+    return float(np.sqrt(np.sum(log_returns**2)))
 
 
 _TS_UNITS = {
-    's':  1,
-    'ms': 1_000,
-    'us': 1_000_000,
-    'ns': 1_000_000_000,
+    "s": 1,
+    "ms": 1_000,
+    "us": 1_000_000,
+    "ns": 1_000_000_000,
 }
 
 
@@ -107,7 +107,7 @@ class Trade:
 
     def __init__(self, timestamp, side, price, volume):
         self.timestamp = timestamp
-        self.side = side      # 'b' (buy aggressor) or 's' (sell aggressor)
+        self.side = side  # 'b' (buy aggressor) or 's' (sell aggressor)
         self.price = price
         self.volume = volume
 
@@ -133,8 +133,9 @@ class TL:
                         Defaults to 'ns' (nanoseconds).
     """
 
-    def __init__(self, name=None, tick_size=1, lob_mode='delta', update_type='realtime',
-                 timestamp_unit='ns'):
+    def __init__(
+        self, name=None, tick_size=1, lob_mode="delta", update_type="realtime", timestamp_unit="ns"
+    ):
         if timestamp_unit not in _TS_UNITS:
             raise ValueError(
                 f"Unknown timestamp_unit '{timestamp_unit}'. Accepted: {list(_TS_UNITS)}"
@@ -146,7 +147,7 @@ class TL:
         self.lob_mode = lob_mode
         self.update_type = update_type
         self.timestamp_unit = timestamp_unit
-        _lobts_mode = 'latest' if lob_mode == 'snapshot' else 'delta'
+        _lobts_mode = "latest" if lob_mode == "snapshot" else "delta"
         self._lobts = LOBts(name=name, tick_size=tick_size, mode=_lobts_mode)
         self._trades = []
 
@@ -233,8 +234,7 @@ class TL:
                 lob_rows.append((ts, "lob", "a", level, price, size))
 
         trade_rows = [
-            (t.timestamp, "trade", t.side, float("nan"), t.price, t.volume)
-            for t in self._trades
+            (t.timestamp, "trade", t.side, float("nan"), t.price, t.volume) for t in self._trades
         ]
 
         return sorted(lob_rows + trade_rows, key=lambda r: r[0])
@@ -287,9 +287,9 @@ class TL:
         )
         result._lobts = self._lobts.get_range(start, stop)
         result._trades = [
-            t for t in self._trades
-            if (start is None or t.timestamp >= start)
-            and (stop is None or t.timestamp <= stop)
+            t
+            for t in self._trades
+            if (start is None or t.timestamp >= start) and (stop is None or t.timestamp <= stop)
         ]
         return result
 
@@ -300,9 +300,7 @@ class TL:
     @property
     def timestamps(self):
         """Return sorted list of all event timestamps (LOB and trades)."""
-        ts = sorted(
-            set(self._lobts.timestamps) | {t.timestamp for t in self._trades}
-        )
+        ts = sorted(set(self._lobts.timestamps) | {t.timestamp for t in self._trades})
         return ts
 
     def rolling(self, window_size):
@@ -315,12 +313,12 @@ class TL:
             window_size: window size in time units (same units as timestamps)
         """
         for ts in self.timestamps:
-            yield self[ts - window_size:ts]
+            yield self[ts - window_size : ts]
 
     def _rolling_items(self, window_size):
         """Yield (end_timestamp, TL slice) pairs for rolling windows."""
         for ts in self.timestamps:
-            yield ts, self[ts - window_size:ts]
+            yield ts, self[ts - window_size : ts]
 
     def ohlc(self, period):
         """
@@ -337,13 +335,9 @@ class TL:
             open, high, low, close, volume, count.
         """
         if period not in _OHLC_PERIODS:
-            raise ValueError(
-                f"Unknown period '{period}'. Accepted: {list(_OHLC_PERIODS)}"
-            )
+            raise ValueError(f"Unknown period '{period}'. Accepted: {list(_OHLC_PERIODS)}")
         if not self._trades:
-            return pd.DataFrame(
-                columns=["open", "high", "low", "close", "volume", "count"]
-            )
+            return pd.DataFrame(columns=["open", "high", "low", "close", "volume", "count"])
 
         period_ts = _OHLC_PERIODS[period] * _TS_UNITS[self.timestamp_unit]
         buckets = {}  # bucket_start -> list of Trade (insertion order = time order)
@@ -358,12 +352,12 @@ class TL:
             trades = buckets[bucket_ts]
             prices = [t.price for t in trades]
             rows[bucket_ts] = {
-                "open":   prices[0],
-                "high":   max(prices),
-                "low":    min(prices),
-                "close":  prices[-1],
+                "open": prices[0],
+                "high": max(prices),
+                "low": min(prices),
+                "close": prices[-1],
                 "volume": sum(t.volume for t in trades),
-                "count":  len(trades),
+                "count": len(trades),
             }
 
         df = pd.DataFrame.from_dict(rows, orient="index")
@@ -490,29 +484,17 @@ class TL:
         for ts, group in df.groupby("timestamp", sort=True):
             levels = group[group["event_type"] == "book_level"]
             if not levels.empty:
-                bids = [
-                    (r.price, r.quantity)
-                    for r in levels[levels["side"] == "bid"].itertuples()
-                ]
-                asks = [
-                    (r.price, r.quantity)
-                    for r in levels[levels["side"] == "ask"].itertuples()
-                ]
+                bids = [(r.price, r.quantity) for r in levels[levels["side"] == "bid"].itertuples()]
+                asks = [(r.price, r.quantity) for r in levels[levels["side"] == "ask"].itertuples()]
                 self.add_lob_snapshot(ts, bids, asks)
 
             updates = group[group["event_type"] == "book_update"]
             if not updates.empty:
-                upd = [
-                    (_lob_side[r.side], r.price, r.quantity)
-                    for r in updates.itertuples()
-                ]
+                upd = [(_lob_side[r.side], r.price, r.quantity) for r in updates.itertuples()]
                 self.add_lob_update(ts, upd)
 
             for r in group[group["event_type"] == "trade"].itertuples():
                 self.add_trade(ts, _trade_side[r.side], r.price, r.quantity)
 
     def __repr__(self):
-        return (
-            f"<TL[{self.name}] lob_snapshots={len(self._lobts)}"
-            f" trades={len(self._trades)}>"
-        )
+        return f"<TL[{self.name}] lob_snapshots={len(self._lobts)}" f" trades={len(self._trades)}>"

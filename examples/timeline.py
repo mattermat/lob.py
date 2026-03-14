@@ -17,9 +17,9 @@ from lobpy import TL
 tl = TL(
     name="BTC-USD",
     tick_size=0.5,
-    lob_mode='realtime',  # 'realtime' or 'fixed'
-                          # 'realtime': LOB updates are in real time (sparse in time)
-                          # 'fixed': LOB updates at every a fixed  full snapshots
+    lob_mode="realtime",  # 'realtime' or 'fixed'
+    # 'realtime': LOB updates are in real time (sparse in time)
+    # 'fixed': LOB updates at every a fixed  full snapshots
 )
 
 # Simulate a sequence of market events
@@ -42,7 +42,7 @@ print("=== Adding Initial LOB Snapshot ===")
 tl.add_lob_snapshot(
     timestamp=timestamps[0],
     bids=[(100.00, 1.5), (99.50, 2.3), (99.00, 1.8), (98.50, 3.0)],
-    asks=[(101.00, 2.1), (101.50, 1.7), (102.00, 2.5), (102.50, 1.2)]
+    asks=[(101.00, 2.1), (101.50, 1.7), (102.00, 2.5), (102.50, 1.2)],
 )
 lob0 = tl.lob[timestamps[0]]
 print(f"LOB at {timestamps[0]}: Bid={lob0.bid[0]}, Ask={lob0.ask[0]}")
@@ -53,10 +53,10 @@ print("=== Adding LOB Update ===")
 tl.add_lob_update(
     timestamp=timestamps[1],
     updates=[
-        ('b', 100.00, 2.0),   # Bid quantity increased
-        ('b', 100.50, 1.0),   # New bid level
-        ('a', 101.00, 1.5),   # Ask quantity decreased
-    ]
+        ("b", 100.00, 2.0),  # Bid quantity increased
+        ("b", 100.50, 1.0),  # New bid level
+        ("a", 101.00, 1.5),  # Ask quantity decreased
+    ],
 )
 lob1 = tl.lob[timestamps[1]]
 print(f"LOB at {timestamps[1]}: Bid={lob1.bid[0]}, Ask={lob1.ask[0]}")
@@ -66,9 +66,9 @@ print()
 print("=== Adding Trade (Buy Aggressor) ===")
 tl.add_trade(
     timestamp=timestamps[2],
-    side='b',        # 'b' = buy aggressor (takes from asks)
-    price=101.00,    # Execution price
-    volume=0.5       # Trade size
+    side="b",  # 'b' = buy aggressor (takes from asks)
+    price=101.00,  # Execution price
+    volume=0.5,  # Trade size
 )
 print(f"Trade at {timestamps[2]}: Buy {0.5} @ {101.00}")
 print()
@@ -77,18 +77,18 @@ print()
 tl.add_lob_update(
     timestamp=timestamps[3],
     updates=[
-        ('a', 101.00, 1.0),   # Ask replenished after trade
-        ('b', 100.50, 0),     # Bid level cancelled
-    ]
+        ("a", 101.00, 1.0),  # Ask replenished after trade
+        ("b", 100.50, 0),  # Bid level cancelled
+    ],
 )
 
 # --- Event 5: Trade (sell aggressor takes liquidity from bid side) ---
 print("=== Adding Trade (Sell Aggressor) ===")
 tl.add_trade(
     timestamp=timestamps[4],
-    side='s',        # 's' = sell aggressor (takes from bids)
+    side="s",  # 's' = sell aggressor (takes from bids)
     price=100.00,
-    volume=1.0
+    volume=1.0,
 )
 print(f"Trade at {timestamps[4]}: Sell {1.0} @ {100.00}")
 print()
@@ -97,10 +97,10 @@ print()
 tl.add_lob_update(
     timestamp=timestamps[5],
     updates=[
-        ('b', 100.00, 1.0),   # Bid replenished
-        ('a', 101.50, 0),     # Ask cancelled
-        ('a', 103.00, 2.0),   # New deeper ask level
-    ]
+        ("b", 100.00, 1.0),  # Bid replenished
+        ("a", 101.50, 0),  # Ask cancelled
+        ("a", 103.00, 2.0),  # New deeper ask level
+    ],
 )
 
 # --- Event 7: Multiple trades (can batch trades at same timestamp) ---
@@ -108,10 +108,10 @@ print("=== Adding Multiple Trades ===")
 tl.add_trades(
     timestamp=timestamps[6],
     trades=[
-        ('b', 101.00, 0.3),
-        ('b', 101.50, 0.2),
-        ('s', 100.00, 0.5),
-    ]
+        ("b", 101.00, 0.3),
+        ("b", 101.50, 0.2),
+        ("s", 100.00, 0.5),
+    ],
 )
 print(f"Multiple trades at {timestamps[6]}")
 print()
@@ -120,24 +120,19 @@ print()
 tl.add_lob_update(
     timestamp=timestamps[7],
     updates=[
-        ('b', 99.50, 3.0),
-        ('a', 101.00, 2.5),
-    ]
+        ("b", 99.50, 3.0),
+        ("a", 101.00, 2.5),
+    ],
 )
 
-tl.add_trade(
-    timestamp=timestamps[8],
-    side='b',
-    price=101.00,
-    volume=1.5
-)
+tl.add_trade(timestamp=timestamps[8], side="b", price=101.00, volume=1.5)
 
 tl.add_lob_update(
     timestamp=timestamps[9],
     updates=[
-        ('b', 100.00, 2.5),
-        ('a', 101.00, 1.0),
-    ]
+        ("b", 100.00, 2.5),
+        ("a", 101.00, 1.0),
+    ],
 )
 
 # ==============================================================================
@@ -151,7 +146,7 @@ print(f"Total events: {len(tl)}, in {len(tl.timestamps)} timestamps")
 print(f"Timestamps: {tl.timestamps[:5]}... (showing first 5)")
 print()
 
-#print(tl.to_np())
+# print(tl.to_np())
 print(tl.to_pd())
 
 # Access LOB at specific timestamp (last LOB state at or before timestamp)
@@ -164,10 +159,10 @@ print()
 
 # sliced timeline
 print(f"sliced [{timestamps[7]}:{timestamps[9]}]")
-print(tl[timestamps[7]:timestamps[9]].to_np())
+print(tl[timestamps[7] : timestamps[9]].to_np())
 
 # Get events in time range
-range_tl = tl[timestamps[2]:timestamps[6]]
+range_tl = tl[timestamps[2] : timestamps[6]]
 print(f"Events in range [{timestamps[2]}, {timestamps[6]}]: {len(range_tl)}")
 print()
 
@@ -179,7 +174,7 @@ print("  ...")
 print()
 
 print(tl.lob)
-print(tl.trades) # TODO: change what __repr__ returns
+print(tl.trades)  # TODO: change what __repr__ returns
 
 # Access events by type
 """
@@ -196,21 +191,21 @@ print()
 # Gueant's A and k of bid and ask side on the complete timeline
 A_ask, k_ask = tl.gueant.ask()
 A_bid, k_bid = tl.gueant.bid()
-print('λ(δ) = A * exp(-k * δ)')
-print(f'  - λ(δ_ask) = {A_ask} * exp(-{k_ask} * δ_ask)')
-print(f'  - λ(δ_bid) = {A_bid} * exp(-{k_bid} * δ_bid)')
-print(tl.gueant.buckets('b'))
+print("λ(δ) = A * exp(-k * δ)")
+print(f"  - λ(δ_ask) = {A_ask} * exp(-{k_ask} * δ_ask)")
+print(f"  - λ(δ_bid) = {A_bid} * exp(-{k_bid} * δ_bid)")
+print(tl.gueant.buckets("b"))
 
 
 # Gueant's but with custom buckets
 custom_buckets = [1, 3, 5, 10]
 A_ask, k_ask = tl.gueant.ask(buckets=custom_buckets)
 print(f"Custom buckets: {custom_buckets}")
-print(f'λ(δ_ask) = {A_ask} * exp(-{k_ask} * δ_ask)')
+print(f"λ(δ_ask) = {A_ask} * exp(-{k_ask} * δ_ask)")
 
 # rolling Gueant's intensity function parameters (pd.Series)
-Aa, ka = tl.gueant.ask(200) # same unit as per timestamps
-Ab, kb = tl.gueant.bid(200) # same unit as per timestamps
+Aa, ka = tl.gueant.ask(200)  # same unit as per timestamps
+Ab, kb = tl.gueant.bid(200)  # same unit as per timestamps
 print(ka)
 
 # rolling Gueant's intensity function and custom buckets
@@ -219,16 +214,16 @@ Aa, ka = tl.gueant.ask(200, buckets=custom_buckets)
 print()
 # OHLC Candles
 print("ohcl 1 second")
-print(tl.ohlc('1s'))
+print(tl.ohlc("1s"))
 print()
 print("ohcl 1 minute")
-print(tl.ohlc('1m'))
+print(tl.ohlc("1m"))
 
 print()
 # Realized Volatility
-tl.realized_vol() # realized volatility on all the trade data
-tl[1150:1350].realized_vol() # realized volatility on the sliced data
-tl.realized_vol(200) # rolling realized volatility
+tl.realized_vol()  # realized volatility on all the trade data
+tl[1150:1350].realized_vol()  # realized volatility on the sliced data
+tl.realized_vol(200)  # rolling realized volatility
 
 print(f"realized vol - full timeline: {tl.realized_vol()}")
 print(f"realized vol - from 1150 to 1350: {tl[1150:1350].realized_vol()}")
@@ -253,9 +248,9 @@ print("=== Combined Statistics ===")
 # - Useful for understanding where liquidity concentrates vs. where it's consumed
 liquidity_profile = tl.liquidity_profile(
     price_range=(99.0, 103.0),  # Price range to analyze
-    bin_size=0.5,                # Bin prices into 0.5 intervals
-    side=None,                   # None (both), 'b' (bids only), 'a' (asks only)
-    normalize_time=True          # Normalize by time spent at each level
+    bin_size=0.5,  # Bin prices into 0.5 intervals
+    side=None,  # None (both), 'b' (bids only), 'a' (asks only)
+    normalize_time=True,  # Normalize by time spent at each level
 )
 
 print("Liquidity Profile (available vs. taken):")
@@ -364,13 +359,17 @@ print(f"  Bid side: A={tl.gueant_A_bid:.4f}, k={tl.gueant_k_bid:.4f}")
 print()
 
 # Get full intensity function (callable)
-intensity_ask = tl.get_intensity_function(side='a', model='gueant')
-intensity_bid = tl.get_intensity_function(side='b', model='gueant')
+intensity_ask = tl.get_intensity_function(side="a", model="gueant")
+intensity_bid = tl.get_intensity_function(side="b", model="gueant")
 print("Intensity at different tick distances:")
-print(f"  Ask: λ(0)={intensity_ask(0):.4f}, λ(1)={intensity_ask(1):.4f}, "
-      f"λ(5)={intensity_ask(5):.4f}")
-print(f"  Bid: λ(0)={intensity_bid(0):.4f}, λ(1)={intensity_bid(1):.4f}, "
-      f"λ(5)={intensity_bid(5):.4f}")
+print(
+    f"  Ask: λ(0)={intensity_ask(0):.4f}, λ(1)={intensity_ask(1):.4f}, "
+    f"λ(5)={intensity_ask(5):.4f}"
+)
+print(
+    f"  Bid: λ(0)={intensity_bid(0):.4f}, λ(1)={intensity_bid(1):.4f}, "
+    f"λ(5)={intensity_bid(5):.4f}"
+)
 print()
 
 # Plot intensity decay (if matplotlib available)
@@ -405,13 +404,17 @@ print(f"  Bid side: k={tl.ho_k_bid:.4f}")
 print()
 
 # Get Ho-Stoll intensity function
-intensity_ho_ask = tl.get_intensity_function(side='a', model='ho-stoll')
-intensity_ho_bid = tl.get_intensity_function(side='b', model='ho-stoll')
+intensity_ho_ask = tl.get_intensity_function(side="a", model="ho-stoll")
+intensity_ho_bid = tl.get_intensity_function(side="b", model="ho-stoll")
 print("Intensity at different tick distances:")
-print(f"  Ask: λ(0)={intensity_ho_ask(0):.4f}, λ(1)={intensity_ho_ask(1):.4f}, "
-      f"λ(5)={intensity_ho_ask(5):.4f}")
-print(f"  Bid: λ(0)={intensity_ho_bid(0):.4f}, λ(1)={intensity_ho_bid(1):.4f}, "
-      f"λ(5)={intensity_ho_bid(5):.4f}")
+print(
+    f"  Ask: λ(0)={intensity_ho_ask(0):.4f}, λ(1)={intensity_ho_ask(1):.4f}, "
+    f"λ(5)={intensity_ho_ask(5):.4f}"
+)
+print(
+    f"  Bid: λ(0)={intensity_ho_bid(0):.4f}, λ(1)={intensity_ho_bid(1):.4f}, "
+    f"λ(5)={intensity_ho_bid(5):.4f}"
+)
 print()
 
 # --- VPIN (Volume-Synchronized Probability of Informed Trading) ---
@@ -432,26 +435,22 @@ print()
 
 # VPIN calculation with custom parameters
 vpin_custom = tl.calculate_vpin(
-    bucket_size=50,      # Volume per bucket
-    num_buckets=50,      # Number of buckets for VPIN calculation
-    method='bulk'        # 'bulk' or 'trade' classification
+    bucket_size=50,  # Volume per bucket
+    num_buckets=50,  # Number of buckets for VPIN calculation
+    method="bulk",  # 'bulk' or 'trade' classification
 )
 print(f"VPIN (custom params): {vpin_custom:.4f}")
 print()
 
 # VPIN time series
-vpin_ts = tl.vpin_ts(
-    bucket_size=50,
-    num_buckets=50,
-    rolling=True         # Calculate rolling VPIN
-)
+vpin_ts = tl.vpin_ts(bucket_size=50, num_buckets=50, rolling=True)  # Calculate rolling VPIN
 print("VPIN Time Series (rolling):")
 print(vpin_ts.head())
 print()
 
 # Trade classification for VPIN (Bulk Volume Classification)
 # Classifies each volume bucket as buy or sell based on price movement
-trade_classification = tl.get_trade_classification(method='bulk')
+trade_classification = tl.get_trade_classification(method="bulk")
 print("Trade Classification (for VPIN):")
 print(trade_classification.head())
 print()
@@ -471,22 +470,19 @@ print()
 print("=== Filtering and Queries ===")
 
 # Filter by event type
-buy_trades = tl.filter_trades(side='b')
+buy_trades = tl.filter_trades(side="b")
 print(f"Buy trades only: {len(buy_trades)}")
 
-sell_trades = tl.filter_trades(side='s')
+sell_trades = tl.filter_trades(side="s")
 print(f"Sell trades only: {len(sell_trades)}")
 
 # Filter by price range
-trades_near_best = tl.filter_trades(
-    min_price=100.0,
-    max_price=101.5
-)
+trades_near_best = tl.filter_trades(min_price=100.0, max_price=101.5)
 print(f"Trades in price range [100.0, 101.5]: {len(trades_near_best)}")
 print()
 
 # Get LOB events only
-lob_snapshots = tl.filter_events(event_type='lob')
+lob_snapshots = tl.filter_events(event_type="lob")
 print(f"LOB events: {len(lob_snapshots)}")
 print()
 
@@ -538,7 +534,7 @@ print(f"LOB reconstructed at {timestamps[2] - 25}: spread = {lob_at_1175.spread}
 print()
 
 # Get nearest trade to a timestamp
-nearest_trade = tl.nearest_trade(timestamp=1180, direction='before')
+nearest_trade = tl.nearest_trade(timestamp=1180, direction="before")
 print(f"Nearest trade before 1180: {nearest_trade.timestamp} @ {nearest_trade.price}")
 print()
 
@@ -588,9 +584,9 @@ print("a unified interface for analyzing LOB and trade data together.")
 # APPENDIX: DETAILED LIQUIDITY PROFILE EXPLANATION
 # ==============================================================================
 
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 print("APPENDIX: How liquidity_profile() Works")
-print("="*80 + "\n")
+print("=" * 80 + "\n")
 
 print("The liquidity profile answers the question:")
 print("'Where is liquidity posted vs. where is it actually consumed?'\n")
@@ -641,15 +637,15 @@ print("  • If available_qty is high but trade_count is low: Resistance/support
 print("  • Asymmetry between bid/ask profiles: Directional pressure")
 print()
 
-print("="*80)
+print("=" * 80)
 
 # ==============================================================================
 # APPENDIX 2: INTENSITY FUNCTION ESTIMATION
 # ==============================================================================
 
-print("\n" + "="*80)
+print("\n" + "=" * 80)
 print("APPENDIX 2: Intensity Function Parameter Estimation")
-print("="*80 + "\n")
+print("=" * 80 + "\n")
 
 print("1. GUÉANT INTENSITY FUNCTION (Exponential Model)")
 print("-" * 80)
@@ -804,7 +800,7 @@ print("     - Increase posted quotes when VPIN is low")
 print("     - Pull liquidity when VPIN exceeds threshold")
 print()
 
-print("="*80)
+print("=" * 80)
 
 """
  1. Guéant Intensity Function (Exponential)

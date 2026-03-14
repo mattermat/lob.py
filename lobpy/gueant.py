@@ -101,8 +101,12 @@ def _compute_buckets(tl, side):
     # --- assemble DataFrame ---
     all_deltas = sorted(set(N) | set(T))
     rows = [
-        (d, N.get(d, 0), T.get(d, 0.0),
-         N[d] / T[d] if T.get(d, 0.0) > 0 and N.get(d, 0) > 0 else float("nan"))
+        (
+            d,
+            N.get(d, 0),
+            T.get(d, 0.0),
+            N[d] / T[d] if T.get(d, 0.0) > 0 and N.get(d, 0) > 0 else float("nan"),
+        )
         for d in all_deltas
     ]
     return pd.DataFrame(rows, columns=["delta", "N", "T", "lambda"])
@@ -208,6 +212,7 @@ class GueantAccessor:
                      threshold are collected in a silent overflow bin (excluded from fit).
                      If None, one data point per integer δ is used.
         """
+
         def _compute(tl):
             raw = _compute_buckets(tl, "a")
             return _aggregate_buckets(raw, buckets) if buckets is not None else raw
@@ -234,6 +239,7 @@ class GueantAccessor:
                      threshold are collected in a silent overflow bin (excluded from fit).
                      If None, one data point per integer δ is used.
         """
+
         def _compute(tl):
             raw = _compute_buckets(tl, "b")
             return _aggregate_buckets(raw, buckets) if buckets is not None else raw
