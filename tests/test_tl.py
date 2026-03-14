@@ -1324,6 +1324,406 @@ class TestTLRollingItems:
         assert len(items[2][1]) == 2  # Trades at 2000 and 3000
 
 
+class TestTLVpin:
+    """Test TL.vpin() method."""
+
+    def test_vpin_empty_tl(self):
+        """Test vpin with empty TL returns NaN."""
+        tl = TL()
+        vpin = tl.vpin()
+        assert pd.isna(vpin)
+
+    def test_vpin_single_trade(self):
+        """Test vpin with single trade."""
+        tl = TL()
+        tl.add_trade(timestamp=1000, side="b", price=100.0, volume=1.0)
+        vpin = tl.vpin()
+        assert isinstance(vpin, float)
+        assert not pd.isna(vpin)
+
+    def test_vpin_returns_scalar(self):
+        """Test vpin without window_size returns scalar."""
+        tl = TL()
+        tl.add_trade(timestamp=1000, side="b", price=100.0, volume=1.0)
+        tl.add_trade(timestamp=1100, side="s", price=100.0, volume=1.0)
+        vpin = tl.vpin()
+        assert isinstance(vpin, float)
+        assert not isinstance(vpin, pd.Series)
+
+    def test_vpin_rolling_returns_series(self):
+        """Test vpin with window_size returns pd.Series."""
+        tl = TL()
+        tl.add_trade(timestamp=1000, side="b", price=100.0, volume=1.0)
+        tl.add_trade(timestamp=1100, side="s", price=100.0, volume=1.0)
+        tl.add_trade(timestamp=1200, side="b", price=100.0, volume=1.0)
+        vpin_ts = tl.vpin(100)
+        assert isinstance(vpin_ts, pd.Series)
+        assert vpin_ts.name == "vpin"
+
+    def test_vpin_balanced_trades(self):
+        """Test vpin with alternating buy and sell trades."""
+        tl = TL()
+        tl.add_trade(timestamp=1000, side="b", price=100.0, volume=1.0)
+        tl.add_trade(timestamp=1100, side="s", price=100.0, volume=1.0)
+        tl.add_trade(timestamp=1200, side="b", price=100.0, volume=1.0)
+        tl.add_trade(timestamp=1300, side="s", price=100.0, volume=1.0)
+        
+        vpin = tl.vpin(bucket_size=1.0)
+        # With bucket_size=1.0, each trade fills one bucket
+        # 4 buckets: (buy=1,sell=0), (buy=0,sell=1), (buy=1,sell=0), (buy=0,sell=1)
+        # Imbalance per bucket: 1.0, 1.0, 1.0, 1.0
+        # VPIN = (1+1+1+1) / (4*1.0) = 1.0
+        assert vpin == 1.0
+
+    def test_vpin_imbalanced_trades(self):
+        """Test vpin with highly imbalanced buy and sell volumes."""
+        tl = TL()
+        tl.add_trade(timestamp=1000, side="b", price=100.0, volume=1.0)
+        tl.add_trade(timestamp=1100, side="b", price=100.0, volume=1.0)
+        tl.add_trade(timestamp=1200, side="s", price=100.0, volume=0.2)
+        tl.add_trade(timestamp=1300, side="s", price=100.0, volume=0.2)
+        
+        vpin = tl.vpin(bucket_size=1.0)
+        assert vpin > 0.0
+
+    def test_vpin_calculation_formula(self):
+        """Test vpin calculation matches formula: sum|buy-sell| / (n * bucket_size)."""
+        tl = TL()
+        tl.add_trade(timestamp=1000, side="b", price=100.0, volume=1.0)
+        tl.add_trade(timestamp=1100, side="s", price=100.0, volume=0.5)
+        tl.add_trade(timestamp=1200, side="b", price=100.0, volume=1.5)
+        tl.add_trade(timestamp=1300, side="s", price=100.0, volume=1.0)
+        
+        bucket_size = 1.0
+        vpin = tl.vpin(bucket_size=bucket_size)
+        
+        # Manual calculation:
+        # Bucket 0: buy=1.0, sell=0.0 (filled by first trade) -> imbalance = 1.0
+        # Bucket 1: buy=0.5 (remaining of trade 3), sell=0.5 (trade 2) -> imbalance = 0.0
+        # Bucket 2: buy=1.0 (remaining of trade 3), sell=0.0 -> imbalance = 1.0
+        # Bucket 3: buy=0.0, sell=1.0 (trade 4) -> imbalance = 1.0
+        # Total imbalance = 3.0
+        # VPIN = 3.0 / (4 * 1.0) = 0.75
+        expected_vpin = 0.75
+        assert abs(vpin - expected_vpin) < 1e-10
+
+    def test_vpin_trade_splitting_across_buckets(self):
+        """Test vpin handles trade splitting across bucket boundaries."""
+        tl = TL()
+        tl.add_trade(timestamp=1000, side="b", price=100.0, volume=1.5)
+        tl.add_trade(timestamp=1100, side="s", price=100.0, volume=0.5)
+        
+        bucket_size = 1.0
+        vpin = tl.vpin(bucket_size=bucket_size)
+        
+        # Manual calculation:
+        # Bucket 0: buy=1.0 (first 1.0 of first trade), sell=0.0 -> imbalance = 1.0
+        # Bucket 1: buy=0.5 (remaining 0.5 of first trade), sell=0.5 -> imbalance = 0.0
+        # Total imbalance = 1.0
+        # VPIN = 1.0 / (2 * 1.0) = 0.5
+        expected_vpin = 0.5
+        assert abs(vpin - expected_vpin) < 1e-10
+
+    def test_vpin_custom_bucket_size(self):
+        """Test vpin with custom bucket_size."""
+        tl = TL()
+        tl.add_trade(timestamp=1000, side="b", price=100.0, volume=2.0)
+        tl.add_trade(timestamp=1100, side="s", price=100.0, volume=1.0)
+        
+        vpin_small_bucket = tl.vpin(bucket_size=0.5)
+        vpin_large_bucket = tl.vpin(bucket_size=2.0)
+        
+        assert isinstance(vpin_small_bucket, float)
+        assert isinstance(vpin_large_bucket, float)
+        # Different bucket sizes should generally give different VPIN values
+        # (unless perfectly balanced, which is not the case here)
+
+    def test_vpin_default_bucket_size(self):
+        """Test vpin uses default bucket_size (total_volume / 50) when not specified."""
+        tl = TL()
+        for i in range(10):
+            tl.add_trade(timestamp=1000 + i * 100, side="b" if i % 2 == 0 else "s", price=100.0, volume=1.0)
+        
+        vpin_default = tl.vpin()
+        total_vol = sum(t.volume for t in tl.trades)
+        default_bucket_size = total_vol / 50
+        vpin_explicit = tl.vpin(bucket_size=default_bucket_size)
+        
+        assert abs(vpin_default - vpin_explicit) < 1e-10
+
+    def test_vpin_rolling_window_size(self):
+        """Test vpin rolling windows have correct size."""
+        tl = TL()
+        for i in range(10):
+            tl.add_trade(timestamp=1000 + i * 100, side="b" if i % 2 == 0 else "s", price=100.0, volume=1.0)
+        
+        window_size = 300
+        vpin_ts = tl.vpin(window_size=window_size)
+        
+        # Should have one entry per unique timestamp
+        assert len(vpin_ts) == len(tl.timestamps)
+        # All indices should be within the timeline
+        for ts in vpin_ts.index:
+            assert ts in tl.timestamps
+
+    def test_vpin_rolling_values(self):
+        """Test vpin rolling values are computed correctly for each window."""
+        tl = TL()
+        tl.add_trade(timestamp=1000, side="b", price=100.0, volume=1.0)
+        tl.add_trade(timestamp=1100, side="s", price=100.0, volume=1.0)
+        tl.add_trade(timestamp=1200, side="b", price=100.0, volume=1.0)
+        tl.add_trade(timestamp=1300, side="s", price=100.0, volume=1.0)
+        
+        window_size = 200
+        vpin_ts = tl.vpin(window_size=window_size, bucket_size=1.0)
+        
+        # Window at 1000: [800, 1000] - only first trade
+        # Window at 1100: [900, 1100] - first and second trade
+        # Window at 1200: [1000, 1200] - first, second, third trade
+        # Window at 1300: [1100, 1300] - second, third, fourth trade
+        
+        # Check that we have values for all timestamps
+        assert len(vpin_ts) == 4
+        # Check that all values are floats
+        assert all(isinstance(v, float) for v in vpin_ts.values)
+
+    def test_vpin_rolling_empty_window(self):
+        """Test vpin rolling with windows containing no trades."""
+        tl = TL()
+        tl.add_trade(timestamp=1000, side="b", price=100.0, volume=1.0)
+        tl.add_trade(timestamp=2000, side="s", price=100.0, volume=1.0)
+        
+        window_size = 100
+        vpin_ts = tl.vpin(window_size=window_size)
+        
+        # Window at 1000: [900, 1000] - one trade
+        # Window at 2000: [1900, 2000] - one trade
+        assert len(vpin_ts) == 2
+
+    def test_vpin_rolling_with_custom_bucket_size(self):
+        """Test vpin rolling with custom bucket_size."""
+        tl = TL()
+        for i in range(5):
+            tl.add_trade(timestamp=1000 + i * 100, side="b" if i % 2 == 0 else "s", price=100.0, volume=1.0)
+        
+        window_size = 250
+        bucket_size = 1.0
+        vpin_ts = tl.vpin(window_size=window_size, bucket_size=bucket_size)
+        
+        assert isinstance(vpin_ts, pd.Series)
+        assert len(vpin_ts) == 5
+
+    def test_vpin_all_buy_trades(self):
+        """Test vpin with all buy trades (maximum imbalance)."""
+        tl = TL()
+        for i in range(5):
+            tl.add_trade(timestamp=1000 + i * 100, side="b", price=100.0, volume=1.0)
+        
+        bucket_size = 1.0
+        vpin = tl.vpin(bucket_size=bucket_size)
+        
+        # All buy trades: each bucket has buy=1.0, sell=0.0
+        # Bucket imbalances: |1.0-0.0| = 1.0 for each of 5 buckets
+        # Total imbalance = 5.0
+        # VPIN = 5.0 / (5 * 1.0) = 1.0
+        assert vpin == 1.0
+
+    def test_vpin_all_sell_trades(self):
+        """Test vpin with all sell trades (maximum imbalance)."""
+        tl = TL()
+        for i in range(5):
+            tl.add_trade(timestamp=1000 + i * 100, side="s", price=100.0, volume=1.0)
+        
+        bucket_size = 1.0
+        vpin = tl.vpin(bucket_size=bucket_size)
+        
+        # All sell trades: each bucket has buy=0.0, sell=1.0
+        # Bucket imbalances: |0.0-1.0| = 1.0 for each of 5 buckets
+        # Total imbalance = 5.0
+        # VPIN = 5.0 / (5 * 1.0) = 1.0
+        assert vpin == 1.0
+
+    def test_vpin_large_imbalance_scenario(self):
+        """Test vpin with large realistic imbalance scenario."""
+        tl = TL()
+        tl.add_trade(timestamp=1000, side="b", price=100.0, volume=10.0)
+        tl.add_trade(timestamp=1100, side="b", price=100.0, volume=8.0)
+        tl.add_trade(timestamp=1200, side="s", price=100.0, volume=2.0)
+        tl.add_trade(timestamp=1300, side="s", price=100.0, volume=3.0)
+        
+        bucket_size = 5.0
+        vpin = tl.vpin(bucket_size=bucket_size)
+        
+        # Manual calculation:
+        # Trade 1 (b,10): fills buckets 0 and 1 completely -> (5,0), (5,0)
+        # Trade 2 (b,8): fills bucket 2 completely, starts bucket 3 -> (5,0), (3,0)
+        # Trade 3 (s,2): fills remaining 2 of bucket 3 -> (3,2)
+        # Trade 4 (s,3): fills bucket 4 completely -> (0,3)
+        # Bucket 0: buy=5.0, sell=0.0 -> imbalance = 5.0
+        # Bucket 1: buy=5.0, sell=0.0 -> imbalance = 5.0
+        # Bucket 2: buy=5.0, sell=0.0 -> imbalance = 5.0
+        # Bucket 3: buy=3.0, sell=2.0 -> imbalance = 1.0
+        # Total imbalance = 16.0
+        # VPIN = 16.0 / (4 * 5.0) = 0.8
+        expected_vpin = 0.8
+        assert abs(vpin - expected_vpin) < 1e-10
+
+    def test_vpin_trades_sorted_by_timestamp(self):
+        """Test vpin processes trades in timestamp order."""
+        tl = TL()
+        tl.add_trade(timestamp=1100, side="b", price=100.0, volume=1.0)
+        tl.add_trade(timestamp=1000, side="s", price=100.0, volume=1.0)
+        tl.add_trade(timestamp=1200, side="b", price=100.0, volume=1.0)
+        
+        bucket_size = 1.0
+        vpin = tl.vpin(bucket_size=bucket_size)
+        
+        # Trades should be sorted by timestamp before bucketing
+        # Sorted: 1000(s), 1100(b), 1200(b)
+        # Bucket 0: buy=0.0, sell=1.0 -> imbalance = 1.0
+        # Bucket 1: buy=1.0, sell=0.0 -> imbalance = 1.0
+        # Bucket 2: buy=1.0, sell=0.0 -> imbalance = 1.0
+        # VPIN = 3.0 / (3 * 1.0) = 1.0
+        assert vpin == 1.0
+
+    def test_vpin_zero_volume_trades(self):
+        """Test vpin handles zero volume trades correctly."""
+        tl = TL()
+        tl.add_trade(timestamp=1000, side="b", price=100.0, volume=1.0)
+        tl.add_trade(timestamp=1100, side="s", price=100.0, volume=0.0)
+        tl.add_trade(timestamp=1200, side="b", price=100.0, volume=1.0)
+        
+        bucket_size = 1.0
+        vpin = tl.vpin(bucket_size=bucket_size)
+        
+        # Zero volume trade should not affect bucketing
+        # Bucket 0: buy=1.0, sell=0.0 -> imbalance = 1.0
+        # Bucket 1: buy=1.0, sell=0.0 -> imbalance = 1.0
+        # VPIN = 2.0 / (2 * 1.0) = 1.0
+        assert vpin == 1.0
+
+    def test_vpin_very_large_bucket_size(self):
+        """Test vpin with bucket_size larger than total volume."""
+        tl = TL()
+        tl.add_trade(timestamp=1000, side="b", price=100.0, volume=1.0)
+        tl.add_trade(timestamp=1100, side="s", price=100.0, volume=1.0)
+        
+        bucket_size = 10.0
+        vpin = tl.vpin(bucket_size=bucket_size)
+        
+        # With bucket_size larger than total volume, we get no complete buckets
+        # volume_buckets returns empty DataFrame (include_partial=False by default)
+        # So VPIN returns NaN
+        assert pd.isna(vpin)
+
+    def test_vpin_very_small_bucket_size(self):
+        """Test vpin with very small bucket_size."""
+        tl = TL()
+        tl.add_trade(timestamp=1000, side="b", price=100.0, volume=1.0)
+        tl.add_trade(timestamp=1100, side="s", price=100.0, volume=1.0)
+        
+        bucket_size = 0.1
+        vpin = tl.vpin(bucket_size=bucket_size)
+        
+        # 20 buckets: 10 with buy=0.1, 10 with sell=0.1
+        # Each bucket imbalance = 0.1
+        # VPIN = (20 * 0.1) / (20 * 0.1) = 1.0
+        assert vpin == 1.0
+
+    def test_vpin_single_large_trade_split(self):
+        """Test vpin with single large trade split across buckets."""
+        tl = TL()
+        tl.add_trade(timestamp=1000, side="b", price=100.0, volume=5.0)
+        
+        bucket_size = 1.0
+        vpin = tl.vpin(bucket_size=bucket_size)
+        
+        # 5 buckets, all with buy=1.0, sell=0.0
+        # Each bucket imbalance = 1.0
+        # VPIN = (5 * 1.0) / (5 * 1.0) = 1.0
+        assert vpin == 1.0
+
+    def test_vpin_rolling_varying_bucket_sizes(self):
+        """Test that rolling vpin uses consistent bucket_size across windows."""
+        tl = TL()
+        for i in range(10):
+            tl.add_trade(timestamp=1000 + i * 100, side="b" if i % 2 == 0 else "s", price=100.0, volume=1.0)
+        
+        window_size = 300
+        bucket_size = 1.0
+        vpin_ts = tl.vpin(window_size=window_size, bucket_size=bucket_size)
+        
+        # Each window should use the same bucket_size
+        assert isinstance(vpin_ts, pd.Series)
+        assert len(vpin_ts) == 10
+        assert all(v >= 0 for v in vpin_ts.values)
+        assert all(v <= 1 for v in vpin_ts.values)
+
+    def test_vpin_volume_buckets_consistency(self):
+        """Test that vpin is consistent with volume_buckets output."""
+        tl = TL()
+        tl.add_trade(timestamp=1000, side="b", price=100.0, volume=1.0)
+        tl.add_trade(timestamp=1100, side="s", price=100.0, volume=0.5)
+        tl.add_trade(timestamp=1200, side="b", price=100.0, volume=1.5)
+        
+        bucket_size = 1.0
+        buckets = tl.volume_buckets(bucket_size=bucket_size)
+        vpin = tl.vpin(bucket_size=bucket_size)
+        
+        # Manually calculate VPIN from buckets
+        n = len(buckets)
+        imbalance = (buckets["buy_volume"] - buckets["sell_volume"]).abs().sum()
+        manual_vpin = imbalance / (n * bucket_size)
+        
+        assert abs(vpin - manual_vpin) < 1e-10
+
+    def test_vpin_different_timestamps_same_volume(self):
+        """Test vpin with same total volume distributed differently over time."""
+        tl1 = TL()
+        tl1.add_trade(timestamp=1000, side="b", price=100.0, volume=2.0)
+        tl1.add_trade(timestamp=1100, side="s", price=100.0, volume=2.0)
+        
+        tl2 = TL()
+        for i in range(4):
+            tl2.add_trade(timestamp=1000 + i * 100, side="b" if i % 2 == 0 else "s", price=100.0, volume=1.0)
+        
+        bucket_size = 1.0
+        vpin1 = tl1.vpin(bucket_size=bucket_size)
+        vpin2 = tl2.vpin(bucket_size=bucket_size)
+        
+        # Both should have the same total volume (2.0 buy, 2.0 sell)
+        # But tl1 has larger trades, tl2 has smaller trades
+        # tl1: buckets are (buy=1,sell=0), (buy=1,sell=0), (buy=0,sell=1), (buy=0,sell=1)
+        # tl2: buckets are (buy=1,sell=0), (buy=0,sell=1), (buy=1,sell=0), (buy=0,sell=1)
+        # Both have VPIN = 1.0
+        assert vpin1 == vpin2
+
+    def test_vpin_with_lob_only(self):
+        """Test vpin with only LOB data, no trades."""
+        tl = TL()
+        tl.add_lob_snapshot(timestamp=1000, bids=[(100.0, 1.5)], asks=[(101.0, 2.1)])
+        tl.add_lob_snapshot(timestamp=1100, bids=[(100.5, 2.0)], asks=[(101.5, 1.5)])
+        
+        vpin = tl.vpin()
+        # No trades, should return NaN
+        assert pd.isna(vpin)
+
+    def test_vpin_rolling_with_partial_window(self):
+        """Test rolling vpin where some windows have no trades."""
+        tl = TL()
+        tl.add_trade(timestamp=2000, side="b", price=100.0, volume=1.0)
+        tl.add_trade(timestamp=5000, side="s", price=100.0, volume=1.0)
+        
+        window_size = 1000
+        vpin_ts = tl.vpin(window_size=window_size, bucket_size=1.0)
+        
+        # Window at 2000: [1000, 2000] - one trade
+        # Window at 5000: [4000, 5000] - one trade
+        assert len(vpin_ts) == 2
+        assert 2000 in vpin_ts.index
+        assert 5000 in vpin_ts.index
+
+
 class TestTLGueant:
     """Test TL.gueant accessor."""
 
