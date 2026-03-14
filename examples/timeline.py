@@ -9,8 +9,9 @@ of statistics that mix order book and execution data, such as:
 - Volume-weighted statistics
 """
 
-from lobpy import TL
 import numpy as np  # For intensity function examples
+
+from lobpy import TL
 
 # Create a TimeLine with configuration
 tl = TL(
@@ -43,7 +44,8 @@ tl.add_lob_snapshot(
     bids=[(100.00, 1.5), (99.50, 2.3), (99.00, 1.8), (98.50, 3.0)],
     asks=[(101.00, 2.1), (101.50, 1.7), (102.00, 2.5), (102.50, 1.2)]
 )
-print(f"LOB at {timestamps[0]}: Bid={tl.lob[timestamps[0]].bid[0]}, Ask={tl.lob[timestamps[0]].ask[0]}")
+lob0 = tl.lob[timestamps[0]]
+print(f"LOB at {timestamps[0]}: Bid={lob0.bid[0]}, Ask={lob0.ask[0]}")
 print()
 
 # --- Event 2: LOB update (incremental change) ---
@@ -56,7 +58,8 @@ tl.add_lob_update(
         ('a', 101.00, 1.5),   # Ask quantity decreased
     ]
 )
-print(f"LOB at {timestamps[1]}: Bid={tl.lob[timestamps[1]].bid[0]}, Ask={tl.lob[timestamps[1]].ask[0]}")
+lob1 = tl.lob[timestamps[1]]
+print(f"LOB at {timestamps[1]}: Bid={lob1.bid[0]}, Ask={lob1.ask[0]}")
 print()
 
 # --- Event 3: Trade (buy aggressor takes liquidity from ask side) ---
@@ -364,8 +367,10 @@ print()
 intensity_ask = tl.get_intensity_function(side='a', model='gueant')
 intensity_bid = tl.get_intensity_function(side='b', model='gueant')
 print("Intensity at different tick distances:")
-print(f"  Ask: λ(0)={intensity_ask(0):.4f}, λ(1)={intensity_ask(1):.4f}, λ(5)={intensity_ask(5):.4f}")
-print(f"  Bid: λ(0)={intensity_bid(0):.4f}, λ(1)={intensity_bid(1):.4f}, λ(5)={intensity_bid(5):.4f}")
+print(f"  Ask: λ(0)={intensity_ask(0):.4f}, λ(1)={intensity_ask(1):.4f}, "
+      f"λ(5)={intensity_ask(5):.4f}")
+print(f"  Bid: λ(0)={intensity_bid(0):.4f}, λ(1)={intensity_bid(1):.4f}, "
+      f"λ(5)={intensity_bid(5):.4f}")
 print()
 
 # Plot intensity decay (if matplotlib available)
@@ -403,8 +408,10 @@ print()
 intensity_ho_ask = tl.get_intensity_function(side='a', model='ho-stoll')
 intensity_ho_bid = tl.get_intensity_function(side='b', model='ho-stoll')
 print("Intensity at different tick distances:")
-print(f"  Ask: λ(0)={intensity_ho_ask(0):.4f}, λ(1)={intensity_ho_ask(1):.4f}, λ(5)={intensity_ho_ask(5):.4f}")
-print(f"  Bid: λ(0)={intensity_ho_bid(0):.4f}, λ(1)={intensity_ho_bid(1):.4f}, λ(5)={intensity_ho_bid(5):.4f}")
+print(f"  Ask: λ(0)={intensity_ho_ask(0):.4f}, λ(1)={intensity_ho_ask(1):.4f}, "
+      f"λ(5)={intensity_ho_ask(5):.4f}")
+print(f"  Bid: λ(0)={intensity_ho_bid(0):.4f}, λ(1)={intensity_ho_bid(1):.4f}, "
+      f"λ(5)={intensity_ho_bid(5):.4f}")
 print()
 
 # --- VPIN (Volume-Synchronized Probability of Informed Trading) ---
@@ -604,12 +611,12 @@ print("  t=1350: Buy 0.3 @ 101.00  (took from ask)")
 print("  t=1450: Buy 1.5 @ 101.00  (took from ask)")
 print()
 print("Calculated metrics:")
-print(f"  available_qty = 2.1 + 1.5 + 1.0 + 2.5 + 1.0 = 8.1")
-print(f"  taken_qty = 0.5 + 0.3 + 1.5 = 2.3")
-print(f"  lob_appearances = 5")
-print(f"  trade_count = 3")
-print(f"  avg_available = 8.1 / 5 = 1.62")
-print(f"  ratio_taken = 2.3 / 8.1 = 0.284 (28.4% of posted liquidity was taken)")
+print("  available_qty = 2.1 + 1.5 + 1.0 + 2.5 + 1.0 = 8.1")
+print("  taken_qty = 0.5 + 0.3 + 1.5 = 2.3")
+print("  lob_appearances = 5")
+print("  trade_count = 3")
+print("  avg_available = 8.1 / 5 = 1.62")
+print("  ratio_taken = 2.3 / 8.1 = 0.284 (28.4% of posted liquidity was taken)")
 print()
 
 print("Use cases:")
@@ -693,9 +700,9 @@ print("  Fitted model: λ(δ) = 0.100 * exp(-0.51 * δ)")
 print()
 
 print("Interpretation of k:")
-print(f"  - k = 0.51 means intensity decays by factor of e^(-0.51) ≈ 0.60 per tick")
-print(f"  - Half-life: δ_half = ln(2)/k = 1.36 ticks")
-print(f"  - At δ=2: intensity is ~0.36 of base intensity")
+print("  - k = 0.51 means intensity decays by factor of e^(-0.51) ≈ 0.60 per tick")
+print("  - Half-life: δ_half = ln(2)/k = 1.36 ticks")
+print("  - At δ=2: intensity is ~0.36 of base intensity")
 print()
 
 print("-" * 80)

@@ -68,6 +68,10 @@ target-version = "py38"
 "lobpy/sortedset.py" = ["N805"]
 "tests/test_lob.py" = ["F401"]
 "tests/test_lobts.py" = ["F401"]
+"lobpy/gueant.py" = ["N806"]
+"tests/test_tl.py" = ["N806"]
+"examples/timeline.py" = ["N806"]
+"examples/real_timeline.py" = ["N806"]
 
 [tool.mypy]
 python_version = "3.9"

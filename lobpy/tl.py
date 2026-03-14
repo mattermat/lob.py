@@ -5,8 +5,8 @@ TimeLine (TL) - combines LOBts with trade events.
 import numpy as np
 import pandas as pd
 
-from .lobts import LOBts
 from .gueant import GueantAccessor
+from .lobts import LOBts
 
 # Mapping from period string to seconds
 _OHLC_PERIODS = {
