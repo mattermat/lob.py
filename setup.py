@@ -11,7 +11,7 @@ def read_file(fname):
 
 setup(
     name="lobpy",
-    version="0.1.0",
+    version="1.1.0",
     author="Mattia",
     description="Limit Order Book in Python",
     long_description=read_file("README.md"),
