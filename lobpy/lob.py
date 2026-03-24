@@ -264,6 +264,12 @@ class LOB:
             print(f"price level {price_level} not existing on bid side")
         return
 
+    def at(self, side, price) -> int:
+        """Return the quantity at a given price level, or 0 if not present."""
+        if side in ('b', 'bid'):
+            return self._bids.get(price, 0)
+        return self._asks.get(price, 0)
+
     def update(self, side, price_level, size, timestamp=0):
         if timestamp != 0:
             self.timestamp = timestamp

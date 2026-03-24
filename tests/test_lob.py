@@ -1074,3 +1074,165 @@ class TestLOBExportParquet:
         lob.to_parquet(path, side=None)
 
         assert path.exists()
+
+
+class TestLOBAt:
+    """Test LOB.at() method for getting quantity at a specific price level."""
+
+    def test_at_bid_long_form_existing_price(self):
+        """Test at() with long form 'bid' side for existing price."""
+        lob = LOB()
+        lob.set_snapshot([(100, 10), (99, 5), (98, 3)], [])
+
+        assert lob.at("bid", 100) == 10
+        assert lob.at("bid", 99) == 5
+        assert lob.at("bid", 98) == 3
+
+    def test_at_bid_short_form_existing_price(self):
+        """Test at() with short form 'b' side for existing price."""
+        lob = LOB()
+        lob.set_snapshot([(100, 10), (99, 5)], [])
+
+        assert lob.at("b", 100) == 10
+        assert lob.at("b", 99) == 5
+
+    def test_at_ask_long_form_existing_price(self):
+        """Test at() with long form 'ask' side for existing price."""
+        lob = LOB()
+        lob.set_snapshot([], [(101, 8), (102, 4), (103, 2)])
+
+        assert lob.at("ask", 101) == 8
+        assert lob.at("ask", 102) == 4
+        assert lob.at("ask", 103) == 2
+
+    def test_at_ask_short_form_existing_price(self):
+        """Test at() with short form 'a' side for existing price."""
+        lob = LOB()
+        lob.set_snapshot([], [(101, 8), (102, 4)])
+
+        assert lob.at("a", 101) == 8
+        assert lob.at("a", 102) == 4
+
+    def test_at_bid_nonexistent_price(self):
+        """Test at() returns 0 for non-existent bid price."""
+        lob = LOB()
+        lob.set_snapshot([(100, 10), (99, 5)], [])
+
+        assert lob.at("bid", 98) == 0
+        assert lob.at("bid", 101) == 0
+        assert lob.at("b", 50) == 0
+
+    def test_at_ask_nonexistent_price(self):
+        """Test at() returns 0 for non-existent ask price."""
+        lob = LOB()
+        lob.set_snapshot([], [(101, 8), (102, 4)])
+
+        assert lob.at("ask", 100) == 0
+        assert lob.at("ask", 103) == 0
+        assert lob.at("a", 200) == 0
+
+    def test_at_empty_order_book(self):
+        """Test at() with empty order book."""
+        lob = LOB()
+
+        assert lob.at("bid", 100) == 0
+        assert lob.at("ask", 100) == 0
+        assert lob.at("b", 100) == 0
+        assert lob.at("a", 100) == 0
+
+    def test_at_with_float_prices(self):
+        """Test at() with float prices."""
+        lob = LOB()
+        lob.set_snapshot([(100.5, 10.25), (99.75, 5.5)], [(101.25, 8.75), (102.5, 3.25)])
+
+        assert lob.at("bid", 100.5) == 10.25
+        assert lob.at("b", 99.75) == 5.5
+        assert lob.at("ask", 101.25) == 8.75
+        assert lob.at("a", 102.5) == 3.25
+
+    def test_at_with_zero_quantity(self):
+        """Test at() when quantity is 0."""
+        lob = LOB()
+        lob.set_snapshot([(100, 0), (99, 5)], [(101, 8), (102, 0)])
+
+        assert lob.at("bid", 100) == 0
+        assert lob.at("ask", 102) == 0
+
+    def test_at_after_update(self):
+        """Test at() after updating a price level."""
+        lob = LOB()
+        lob.set_snapshot([(100, 10), (99, 5)], [])
+
+        assert lob.at("bid", 100) == 10
+
+        lob.update("bid", 100, 15)
+        assert lob.at("bid", 100) == 15
+
+        lob.update("bid", 100, 0)
+        assert lob.at("bid", 100) == 0
+
+    def test_at_after_delete(self):
+        """Test at() after deleting a price level."""
+        lob = LOB()
+        lob.set_snapshot([(100, 10), (99, 5)], [(101, 8)])
+
+        assert lob.at("bid", 100) == 10
+
+        lob._delete_bid_level(100)
+        assert lob.at("bid", 100) == 0
+
+    def test_at_consistency_with_direct_access(self):
+        """Test at() returns same value as direct dictionary access."""
+        lob = LOB()
+        lob.set_snapshot([(100, 10), (99, 5)], [(101, 8), (102, 4)])
+
+        assert lob.at("bid", 100) == lob._bids[100]
+        assert lob.at("b", 99) == lob._bids[99]
+        assert lob.at("ask", 101) == lob._asks[101]
+        assert lob.at("a", 102) == lob._asks[102]
+
+    def test_at_multiple_calls_consistency(self):
+        """Test that multiple calls to at() return consistent values."""
+        lob = LOB()
+        lob.set_snapshot([(100, 10), (99, 5)], [(101, 8)])
+
+        assert lob.at("bid", 100) == 10
+        assert lob.at("bid", 100) == 10
+        assert lob.at("b", 100) == 10
+
+        assert lob.at("ask", 101) == 8
+        assert lob.at("ask", 101) == 8
+        assert lob.at("a", 101) == 8
+
+    def test_at_with_set_updates(self):
+        """Test at() after using set_updates."""
+        lob = LOB()
+        lob.set_updates([("b", 100, 10), ("a", 101, 8)])
+
+        assert lob.at("bid", 100) == 10
+        assert lob.at("ask", 101) == 8
+
+        lob.set_updates([("bid", 100, 15), ("a", 101, 0), ("ask", 102, 5)])
+
+        assert lob.at("b", 100) == 15
+        assert lob.at("a", 101) == 0
+        assert lob.at("ask", 102) == 5
+
+    def test_at_edge_case_single_level(self):
+        """Test at() with single level on each side."""
+        lob = LOB()
+        lob.set_snapshot([(100, 10)], [(101, 8)])
+
+        assert lob.at("bid", 100) == 10
+        assert lob.at("ask", 101) == 8
+        assert lob.at("bid", 99) == 0
+        assert lob.at("ask", 102) == 0
+
+    def test_at_large_quantities(self):
+        """Test at() with large quantities."""
+        lob = LOB()
+        lob.set_snapshot([(100, 1000000), (99, 500000)], [(101, 2000000)])
+
+        assert lob.at("bid", 100) == 1000000
+        assert lob.at("bid", 99) == 500000
+        assert lob.at("ask", 101) == 2000000
