@@ -46,10 +46,10 @@ class TestLOBSetUpdates:
 
         assert len(lob._bids) == 2
         assert len(lob._asks) == 2
-        assert lob._bids[100] == 10
-        assert lob._bids[99] == 5
-        assert lob._asks[101] == 8
-        assert lob._asks[102] == 4
+        assert lob.at("b", 100) == 10
+        assert lob.at("b", 99) == 5
+        assert lob.at("a", 101) == 8
+        assert lob.at("a", 102) == 4
 
     def test_set_updates_with_short_form(self):
         """Test set_updates with short form side parameters ('b', 'a')."""
@@ -58,10 +58,10 @@ class TestLOBSetUpdates:
 
         assert len(lob._bids) == 2
         assert len(lob._asks) == 2
-        assert lob._bids[100] == 10
-        assert lob._bids[99] == 5
-        assert lob._asks[101] == 8
-        assert lob._asks[102] == 4
+        assert lob.at("b", 100) == 10
+        assert lob.at("b", 99) == 5
+        assert lob.at("a", 101) == 8
+        assert lob.at("a", 102) == 4
 
     def test_set_updates_mixed_forms(self):
         """Test set_updates with mixed short and long form side parameters."""
@@ -70,10 +70,10 @@ class TestLOBSetUpdates:
 
         assert len(lob._bids) == 2
         assert len(lob._asks) == 2
-        assert lob._bids[100] == 10
-        assert lob._bids[99] == 5
-        assert lob._asks[101] == 8
-        assert lob._asks[102] == 4
+        assert lob.at("b", 100) == 10
+        assert lob.at("b", 99) == 5
+        assert lob.at("a", 101) == 8
+        assert lob.at("a", 102) == 4
 
     def test_set_updates_delete_levels(self):
         """Test set_updates deleting levels with short form."""
@@ -83,10 +83,10 @@ class TestLOBSetUpdates:
         # Delete level with zero size using short form
         lob.set_updates([("b", 100, 0), ("a", 101, 0)])
 
-        assert 100 not in lob._bids
-        assert 101 not in lob._asks
-        assert 99 in lob._bids
-        assert 102 in lob._asks
+        assert lob.at("b", 100) == 0
+        assert lob.at("a", 101) == 0
+        assert lob.at("b", 99) != 0
+        assert lob.at("a", 102) != 0
 
     def test_set_updates_with_timestamp(self):
         """Test set_updates with timestamp using short form."""
@@ -110,8 +110,8 @@ class TestLOBSnapshot:
 
         assert len(lob._bids) == 3
         assert len(lob._asks) == 2
-        assert lob._bids[100] == 10
-        assert lob._asks[101] == 8
+        assert lob.at("b", 100) == 10
+        assert lob.at("a", 101) == 8
 
     def test_set_snapshot_empty(self):
         """Test setting empty snapshot."""
@@ -136,10 +136,10 @@ class TestLOBSnapshot:
         lob.set_snapshot([(100, 10)], [(101, 8)])
         lob.set_snapshot([(95, 15), (94, 7)], [(106, 12)])
 
-        assert 100 not in lob._bids
-        assert 101 not in lob._asks
-        assert lob._bids[95] == 15
-        assert lob._asks[106] == 12
+        assert lob.at("b", 100) == 0
+        assert lob.at("a", 101) == 0
+        assert lob.at("b", 95) == 15
+        assert lob.at("a", 106) == 12
 
 
 class TestLOBDeleteLevel:
@@ -151,8 +151,8 @@ class TestLOBDeleteLevel:
         lob.set_snapshot([(100, 10), (99, 5)], [])
         lob._delete_bid_level(100)
 
-        assert 100 not in lob._bids
-        assert 99 in lob._bids
+        assert lob.at("b", 100) == 0
+        assert lob.at("b", 99) != 0
         assert len(lob._bids) == 1
 
     def test_delete_bid_level_nonexistent(self):
@@ -169,8 +169,8 @@ class TestLOBDeleteLevel:
         lob.set_snapshot([], [(101, 8), (102, 4)])
         lob._delete_ask_level(101)
 
-        assert 101 not in lob._asks
-        assert 102 in lob._asks
+        assert lob.at("a", 101) == 0
+        assert lob.at("a", 102) != 0
         assert len(lob._asks) == 1
 
     def test_delete_ask_level_nonexistent(self):
@@ -187,7 +187,7 @@ class TestLOBDeleteLevel:
         lob.set_snapshot([(100, 10)], [])
         lob._delete_level("bid", 100)
 
-        assert 100 not in lob._bids
+        assert lob.at("b", 100) == 0
 
     def test_delete_level_ask(self):
         """Test delete_level with side='ask'."""
@@ -195,7 +195,7 @@ class TestLOBDeleteLevel:
         lob.set_snapshot([], [(101, 8)])
         lob._delete_level("ask", 101)
 
-        assert 101 not in lob._asks
+        assert lob.at("a", 101) == 0
 
     def test_delete_level_with_timestamp(self):
         """Test delete_level updates timestamp."""
@@ -216,15 +216,15 @@ class TestLOBUpdate:
         lob.set_snapshot([(100, 10)], [])
         lob._update_bid(100, 15)
 
-        assert lob._bids[100] == 15
+        assert lob.at("b", 100) == 15
 
     def test_update_bid_new(self):
         """Test updating with a new bid level."""
         lob = LOB()
         lob._update_bid(100, 10)
 
-        assert 100 in lob._bids
-        assert lob._bids[100] == 10
+        assert lob.at("b", 100) != 0
+        assert lob.at("b", 100) == 10
 
     def test_update_bid_zero_size(self):
         """Test updating bid with zero size (should delete)."""
@@ -232,7 +232,7 @@ class TestLOBUpdate:
         lob.set_snapshot([(100, 10)], [])
         lob._update_bid(100, 0)
 
-        assert 100 not in lob._bids
+        assert lob.at("b", 100) == 0
 
     def test_update_ask_existing(self):
         """Test updating an existing ask level."""
@@ -240,15 +240,15 @@ class TestLOBUpdate:
         lob.set_snapshot([], [(101, 8)])
         lob._update_ask(101, 12)
 
-        assert lob._asks[101] == 12
+        assert lob.at("a", 101) == 12
 
     def test_update_ask_new(self):
         """Test updating with a new ask level."""
         lob = LOB()
         lob._update_ask(101, 8)
 
-        assert 101 in lob._asks
-        assert lob._asks[101] == 8
+        assert lob.at("a", 101) != 0
+        assert lob.at("a", 101) == 8
 
     def test_update_ask_zero_size(self):
         """Test updating ask with zero size (should delete)."""
@@ -256,7 +256,7 @@ class TestLOBUpdate:
         lob.set_snapshot([], [(101, 8)])
         lob._update_ask(101, 0)
 
-        assert 101 not in lob._asks
+        assert lob.at("a", 101) == 0
 
     def test_update_bid_with_timestamp(self):
         """Test update_bid updates timestamp."""
@@ -279,14 +279,14 @@ class TestLOBUpdate:
         lob = LOB()
         lob.update("bid", 100, 10)
 
-        assert lob._bids[100] == 10
+        assert lob.at("b", 100) == 10
 
     def test_update_side_ask(self):
         """Test update method with side='ask'."""
         lob = LOB()
         lob.update("ask", 101, 8)
 
-        assert lob._asks[101] == 8
+        assert lob.at("a", 101) == 8
 
     def test_update_zero_size_deletes(self):
         """Test that update with zero size deletes level."""
@@ -295,22 +295,22 @@ class TestLOBUpdate:
         lob.update("bid", 100, 0)
         lob.update("ask", 101, 0)
 
-        assert 100 not in lob._bids
-        assert 101 not in lob._asks
+        assert lob.at("b", 100) == 0
+        assert lob.at("a", 101) == 0
 
     def test_update_with_short_form_bid(self):
         """Test update method with side='b' (short form for bid)."""
         lob = LOB()
         lob.update("b", 100, 10)
 
-        assert lob._bids[100] == 10
+        assert lob.at("b", 100) == 10
 
     def test_update_with_short_form_ask(self):
         """Test update method with side='a' (short form for ask)."""
         lob = LOB()
         lob.update("a", 101, 8)
 
-        assert lob._asks[101] == 8
+        assert lob.at("a", 101) == 8
 
 
 class TestLOBProperties:
@@ -393,11 +393,11 @@ class TestLOBGetDelta:
         lob.get_delta([(95, 15)], [(106, 12)])
 
         assert len(lob._bids) == 1
-        assert 95 in lob._bids
-        assert lob._bids[95] == 15
+        assert lob.at("b", 95) != 0
+        assert lob.at("b", 95) == 15
         assert len(lob._asks) == 1
-        assert 106 in lob._asks
-        assert lob._asks[106] == 12
+        assert lob.at("a", 106) != 0
+        assert lob.at("a", 106) == 12
 
     def test_get_delta_with_timestamp(self):
         """Test get_delta updates timestamp."""
@@ -507,7 +507,7 @@ class TestLOBBestPriceOrdering:
         # ask[1] should be second best ask (price only)
         assert lob.ask[1] == 102
         # ask[2] should be third best ask (price only)
-        assert lob._asks.peekitem(2) == (103, 2)
+        assert (lob.ask[2], lob.askq[2]) == (103, 2)
 
     def test_bid_ask_sizes_with_floats(self):
         """Test bidq and askq properties for best bid/ask sizes with floats."""
@@ -1186,10 +1186,10 @@ class TestLOBAt:
         lob = LOB()
         lob.set_snapshot([(100, 10), (99, 5)], [(101, 8), (102, 4)])
 
-        assert lob.at("bid", 100) == lob._bids[100]
-        assert lob.at("b", 99) == lob._bids[99]
-        assert lob.at("ask", 101) == lob._asks[101]
-        assert lob.at("a", 102) == lob._asks[102]
+        assert lob.at("bid", 100) == lob.at("b", 100)
+        assert lob.at("b", 99) == lob.at("b", 99)
+        assert lob.at("ask", 101) == lob.at("a", 101)
+        assert lob.at("a", 102) == lob.at("a", 102)
 
     def test_at_multiple_calls_consistency(self):
         """Test that multiple calls to at() return consistent values."""

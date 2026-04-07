@@ -1,11 +1,7 @@
 import time
 from typing import Any
 
-from .sorteddict import SortedDict
-
-
-def neg(x: int) -> int:
-    return -x
+import numpy as np
 
 
 def _normalize_side(side: str) -> str:
@@ -16,6 +12,22 @@ def _normalize_side(side: str) -> str:
         return "ask"
     else:
         return side
+
+
+def _make_bid_array(levels) -> np.ndarray:
+    """Build bid array sorted descending by price from a list of (price, qty) pairs."""
+    if not len(levels):
+        return np.empty((0, 2), dtype=np.float64)
+    arr = np.array(levels, dtype=np.float64)
+    return arr[np.argsort(-arr[:, 0])]
+
+
+def _make_ask_array(levels) -> np.ndarray:
+    """Build ask array sorted ascending by price from a list of (price, qty) pairs."""
+    if not len(levels):
+        return np.empty((0, 2), dtype=np.float64)
+    arr = np.array(levels, dtype=np.float64)
+    return arr[np.argsort(arr[:, 0])]
 
 
 class _TopValueNumericMixin:
@@ -80,18 +92,17 @@ class _TopValueNumericMixin:
 
 
 class PriceAccessor(_TopValueNumericMixin):
-    def __init__(self, data):
-        self._data = data
+    def __init__(self, arr: np.ndarray):
+        self._arr = arr  # shape (n, 2), col 0 = price
 
     def __getitem__(self, index):
-        items = list(self._data.items())
-        if index < len(items):
-            return items[index][0]
+        if index < len(self._arr):
+            return float(self._arr[index, 0])
         return 0.0
 
     def __eq__(self, other):
         if isinstance(other, PriceAccessor):
-            return self._data == other._data
+            return np.array_equal(self._arr, other._arr)
         return self[0] == other
 
     def __repr__(self):
@@ -99,18 +110,17 @@ class PriceAccessor(_TopValueNumericMixin):
 
 
 class QuantityAccessor(_TopValueNumericMixin):
-    def __init__(self, data):
-        self._data = data
+    def __init__(self, arr: np.ndarray):
+        self._arr = arr  # shape (n, 2), col 1 = qty
 
     def __getitem__(self, index):
-        items = list(self._data.items())
-        if index < len(items):
-            return items[index][1]
+        if index < len(self._arr):
+            return float(self._arr[index, 1])
         return 0.0
 
     def __eq__(self, other):
         if isinstance(other, QuantityAccessor):
-            return self._data == other._data
+            return np.array_equal(self._arr, other._arr)
         return self[0] == other
 
     def __repr__(self):
@@ -118,22 +128,16 @@ class QuantityAccessor(_TopValueNumericMixin):
 
 
 class VolumeImbalanceAccessor(_TopValueNumericMixin):
-    def __init__(self, bids, asks):
+    def __init__(self, bids: np.ndarray, asks: np.ndarray):
         self._bids = bids
         self._asks = asks
 
     def __getitem__(self, index):
-        bid_items = list(self._bids.items())
-        ask_items = list(self._asks.items())
-
         nlevels = index + 1
-
-        total_bid = sum(size for _, size in bid_items[:nlevels])
-        total_ask = sum(size for _, size in ask_items[:nlevels])
-
+        total_bid = float(self._bids[:nlevels, 1].sum()) if len(self._bids) > 0 else 0.0
+        total_ask = float(self._asks[:nlevels, 1].sum()) if len(self._asks) > 0 else 0.0
         if total_bid + total_ask == 0:
             return 0.0
-
         return (total_bid - total_ask) / (total_bid + total_ask)
 
     def __eq__(self, other):
@@ -143,34 +147,17 @@ class VolumeImbalanceAccessor(_TopValueNumericMixin):
         return str(self[0])
 
 
-def _get_levels(data, nlevels=None):
-    """Helper to get levels from SortedDict, optionally limiting nlevels."""
-    items = list(data.items())
-    if nlevels is not None:
-        items = items[:nlevels]
-    return items
-
-
 class LOB:
 
     def __init__(self, name=None, tick_size=1, *, bids=None, asks=None) -> None:
         if name is None:
             name = f"lob{id(self)}"
         self.name = name
-        self._bids = SortedDict(neg)
-        self._asks = SortedDict()
         self.tick_size = tick_size
         self.timestamp = int(time.time() * 1000)
         self._crossing_detected = False
-
-        if bids is None:
-            bids = []
-        if asks is None:
-            asks = []
-        for b in bids:
-            self._bids[b[0]] = b[1]
-        for a in asks:
-            self._asks[a[0]] = a[1]
+        self._bids = _make_bid_array(bids if bids is not None else [])
+        self._asks = _make_ask_array(asks if asks is not None else [])
 
     def _set_tick_size(self, tick_size) -> None:
         self.tick_size = tick_size
@@ -179,12 +166,8 @@ class LOB:
         """
         align the order book to a snapshot
         """
-        self._bids.clear()
-        self._asks.clear()
-        for b in bids:
-            self._bids[b[0]] = b[1]
-        for a in asks:
-            self._asks[a[0]] = a[1]
+        self._bids = _make_bid_array(bids)
+        self._asks = _make_ask_array(asks)
         self.timestamp = timestamp
 
     def set_updates(self, updates, timestamp=0):
@@ -217,12 +200,8 @@ class LOB:
                 else:
                     save_asks[price] = size
 
-        self._bids.clear()
-        self._asks.clear()
-        for price, qty in save_bids.items():
-            self._bids[price] = qty
-        for price, qty in save_asks.items():
-            self._asks[price] = qty
+        self._bids = _make_bid_array(list(save_bids.items()))
+        self._asks = _make_ask_array(list(save_asks.items()))
 
         if timestamp != 0:
             self.timestamp = timestamp
@@ -233,83 +212,98 @@ class LOB:
 
         side = _normalize_side(side)
         if side == "bid":
-            try:
-                del self._bids[price_level]
-            except KeyError:
-                # log
-                print(f"price level {price_level} not existing")
-
+            self._delete_bid_level(price_level)
         elif side == "ask":
-            try:
-                del self._asks[price_level]
-            except KeyError:
-                # log
-                print(f"price level {price_level} not existing")
+            self._delete_ask_level(price_level)
 
     def _delete_ask_level(self, price_level, timestamp=0):
         if timestamp != 0:
             self.timestamp = timestamp
-        try:
-            del self._asks[price_level]
-        except KeyError:
+        if len(self._asks) == 0:
             print(f"price level {price_level} not existing on ask side")
-        return
+            return
+        mask = self._asks[:, 0] != price_level
+        if mask.all():
+            print(f"price level {price_level} not existing on ask side")
+            return
+        self._asks = self._asks[mask]
 
     def _delete_bid_level(self, price_level, timestamp=0):
         if timestamp != 0:
             self.timestamp = timestamp
-        try:
-            del self._bids[price_level]
-        except KeyError:
+        if len(self._bids) == 0:
             print(f"price level {price_level} not existing on bid side")
-        return
+            return
+        mask = self._bids[:, 0] != price_level
+        if mask.all():
+            print(f"price level {price_level} not existing on bid side")
+            return
+        self._bids = self._bids[mask]
 
-    def at(self, side, price) -> int:
+    def at(self, side, price) -> float:
         """Return the quantity at a given price level, or 0 if not present."""
-        if side in ('b', 'bid'):
-            return self._bids.get(price, 0)
-        return self._asks.get(price, 0)
+        if side in ("b", "bid"):
+            arr = self._bids
+            if len(arr) == 0:
+                return 0
+            idx = np.searchsorted(-arr[:, 0], -price)
+            if idx < len(arr) and arr[idx, 0] == price:
+                return float(arr[idx, 1])
+            return 0
+        else:
+            arr = self._asks
+            if len(arr) == 0:
+                return 0
+            idx = np.searchsorted(arr[:, 0], price)
+            if idx < len(arr) and arr[idx, 0] == price:
+                return float(arr[idx, 1])
+            return 0
 
     def update(self, side, price_level, size, timestamp=0):
         if timestamp != 0:
             self.timestamp = timestamp
 
         if size == 0:
-            self._delete_level(side, price_level, timestamp)
+            self._delete_level(side, price_level)
             return
 
         side = _normalize_side(side)
         if side == "bid":
-            try:
-                self._bids[price_level] = size
-
-            except KeyError:
-                # log
-                print(f"price level {price_level} not existing, while updating")
+            self._update_bid(price_level, size)
         elif side == "ask":
-            try:
-                self._asks[price_level] = size
-            except KeyError:
-                # log
-                print(f"price level {price_level} not existing, while updating")
+            self._update_ask(price_level, size)
 
     def _update_ask(self, price_level, size, timestamp=0):
         if timestamp != 0:
             self.timestamp = timestamp
         if size == 0:
             self._delete_ask_level(price_level)
+            return
+        if len(self._asks) == 0:
+            self._asks = np.array([[price_level, size]], dtype=np.float64)
+            return
+        prices = self._asks[:, 0]
+        idx = np.searchsorted(prices, price_level)
+        if idx < len(prices) and prices[idx] == price_level:
+            self._asks[idx, 1] = size
         else:
-            self._asks[price_level] = size
-        return
+            self._asks = np.insert(self._asks, idx, [price_level, size], axis=0)
 
     def _update_bid(self, price_level, size, timestamp=0):
         if timestamp != 0:
             self.timestamp = timestamp
         if size == 0:
             self._delete_bid_level(price_level)
+            return
+        if len(self._bids) == 0:
+            self._bids = np.array([[price_level, size]], dtype=np.float64)
+            return
+        prices = self._bids[:, 0]
+        idx = np.searchsorted(-prices, -price_level)
+        if idx < len(prices) and prices[idx] == price_level:
+            self._bids[idx, 1] = size
         else:
-            self._bids[price_level] = size
-        return
+            self._bids = np.insert(self._bids, idx, [price_level, size], axis=0)
 
     @property
     def ask(self):
@@ -426,43 +420,30 @@ class LOB:
         bid_deltas = []
         ask_deltas = []
 
-        # Get current state
-        old_bids = dict(self._bids.items())
-        old_asks = dict(self._asks.items())
+        old_bids = dict(self._bids)
+        old_asks = dict(self._asks)
 
-        # Convert new snapshot to dicts
         new_bids = {price: qty for price, qty in bids}
         new_asks = {price: qty for price, qty in asks}
 
-        # Find bid changes
         for price, quantity in new_bids.items():
-            old_quantity = old_bids.get(price, 0.0)
-            if quantity != old_quantity:
+            if quantity != old_bids.get(price, 0.0):
                 bid_deltas.append((price, quantity))
 
-        # Find deleted bid levels
         for price in old_bids:
             if price not in new_bids:
                 bid_deltas.append((price, 0.0))
 
-        # Find ask changes
         for price, quantity in new_asks.items():
-            old_quantity = old_asks.get(price, 0.0)
-            if quantity != old_quantity:
+            if quantity != old_asks.get(price, 0.0):
                 ask_deltas.append((price, quantity))
 
-        # Find deleted ask levels
         for price in old_asks:
             if price not in new_asks:
                 ask_deltas.append((price, 0.0))
 
-        # Update internal state to new snapshot
-        self._bids.clear()
-        self._asks.clear()
-        for price, qty in new_bids.items():
-            self._bids[price] = qty
-        for price, qty in new_asks.items():
-            self._asks[price] = qty
+        self._bids = _make_bid_array(list(new_bids.items()))
+        self._asks = _make_ask_array(list(new_asks.items()))
 
         if timestamp != 0:
             self.timestamp = timestamp
@@ -481,33 +462,23 @@ class LOB:
             2D array with shape (n, 2) [price, size] when side specified
             2D array with shape (n, 3) [side, price, size] when side=None
         """
-        import numpy as np
-
         if side == "b":
-            levels = _get_levels(self._bids, nlevels)
-            if not levels:
-                return np.empty((0, 2))
-            return np.array(levels, dtype=float)
+            arr = self._bids[:nlevels] if nlevels is not None else self._bids
+            return arr.copy() if len(arr) > 0 else np.empty((0, 2))
         elif side == "a":
-            levels = _get_levels(self._asks, nlevels)
-            if not levels:
-                return np.empty((0, 2))
-            return np.array(levels, dtype=float)
+            arr = self._asks[:nlevels] if nlevels is not None else self._asks
+            return arr.copy() if len(arr) > 0 else np.empty((0, 2))
         else:
-            if nlevels is None:
-                bid_levels = _get_levels(self._bids)
-                ask_levels = _get_levels(self._asks)
+            if nlevels is not None:
+                bid_n = (nlevels + 1) // 2
+                ask_n = nlevels // 2
             else:
-                bid_levels = _get_levels(self._bids)
-                ask_levels = _get_levels(self._asks)
+                bid_n = len(self._bids)
+                ask_n = len(self._asks)
+            bid_levels = self._bids[:bid_n]
+            ask_levels = self._asks[:ask_n]
 
-                bid_count = (nlevels + 1) // 2
-                ask_count = nlevels // 2
-
-                bid_levels = bid_levels[:bid_count]
-                ask_levels = ask_levels[:ask_count]
-
-            if not bid_levels and not ask_levels:
+            if len(bid_levels) == 0 and len(ask_levels) == 0:
                 return np.empty((0, 3), dtype=object)
 
             data = []
@@ -515,7 +486,6 @@ class LOB:
                 data.append(("b", price, size))
             for price, size in ask_levels:
                 data.append(("a", price, size))
-
             return np.array(data, dtype=object)
 
     def to_pd(self, side=None, nlevels=None):
@@ -542,31 +512,26 @@ class LOB:
             ) from e
 
         if side == "b":
-            levels = _get_levels(self._bids, nlevels)
-            return pd.DataFrame(levels, columns=["price", "size"])
+            arr = self._bids[:nlevels] if nlevels is not None else self._bids
+            return pd.DataFrame(arr, columns=["price", "size"])
         elif side == "a":
-            levels = _get_levels(self._asks, nlevels)
-            return pd.DataFrame(levels, columns=["price", "size"])
+            arr = self._asks[:nlevels] if nlevels is not None else self._asks
+            return pd.DataFrame(arr, columns=["price", "size"])
         else:
-            if nlevels is None:
-                bid_levels = _get_levels(self._bids)
-                ask_levels = _get_levels(self._asks)
+            if nlevels is not None:
+                bid_n = (nlevels + 1) // 2
+                ask_n = nlevels // 2
             else:
-                bid_levels = _get_levels(self._bids)
-                ask_levels = _get_levels(self._asks)
-
-                bid_count = (nlevels + 1) // 2
-                ask_count = nlevels // 2
-
-                bid_levels = bid_levels[:bid_count]
-                ask_levels = ask_levels[:ask_count]
+                bid_n = len(self._bids)
+                ask_n = len(self._asks)
+            bid_levels = self._bids[:bid_n]
+            ask_levels = self._asks[:ask_n]
 
             data = []
             for price, size in bid_levels:
                 data.append((price, size, "b"))
             for price, size in ask_levels:
                 data.append((price, size, "a"))
-
             return pd.DataFrame(data, columns=["price", "size", "side"])
 
     def to_csv(self, path, side=None, nlevels=None):
@@ -613,11 +578,9 @@ class LOB:
             True if the book is consistent (best bid < best ask or one side empty),
             False if the book is crossed (best bid >= best ask).
         """
-        if not self._bids or not self._asks:
+        if len(self._bids) == 0 or len(self._asks) == 0:
             return True
-        bid_price = self.bid[0]
-        ask_price = self.ask[0]
-        return bid_price < ask_price
+        return float(self._bids[0, 0]) < float(self._asks[0, 0])
 
     def get_slippage(self, volume, side="midprice"):
         """
@@ -640,8 +603,7 @@ class LOB:
         if side == "ask":
             remaining = volume
             total_cost = 0.0
-            ask_items = list(self._asks.items())
-            for price, size in ask_items:
+            for price, size in self._asks:
                 if remaining <= 0:
                     break
                 take = min(remaining, size)
@@ -649,13 +611,11 @@ class LOB:
                 remaining -= take
             if remaining > 0:
                 return float("inf")
-            avg_price = total_cost / volume
-            return avg_price - self.midprice
+            return total_cost / volume - self.midprice
         elif side == "bid":
             remaining = volume
             total_cost = 0.0
-            bid_items = list(self._bids.items())
-            for price, size in bid_items:
+            for price, size in self._bids:
                 if remaining <= 0:
                     break
                 take = min(remaining, size)
@@ -663,8 +623,7 @@ class LOB:
                 remaining -= take
             if remaining > 0:
                 return float("inf")
-            avg_price = total_cost / volume
-            return self.midprice - avg_price
+            return self.midprice - total_cost / volume
         else:
             raise ValueError(f"Invalid side: {side}. Must be 'midprice', 'a'/'ask', or 'b'/'bid'.")
 
@@ -705,10 +664,10 @@ class LOB:
         """
         updates = []
 
-        self_bids = dict(self._bids.items())
-        self_asks = dict(self._asks.items())
-        other_bids = dict(other._bids.items())
-        other_asks = dict(other._asks.items())
+        self_bids = dict(self._bids)
+        self_asks = dict(self._asks)
+        other_bids = dict(other._bids)
+        other_asks = dict(other._asks)
 
         for price, size in other_bids.items():
             if self_bids.get(price) != size:
@@ -749,35 +708,28 @@ class LOB:
         if side not in ("bid", "ask"):
             raise ValueError(f"Invalid side: {side}. Must be 'b'/'bid' or 'a'/'ask'.")
 
-        data = self._bids if side == "bid" else self._asks
-        items = list(data.items())
+        arr = self._bids if side == "bid" else self._asks
 
-        if not items:
+        if len(arr) == 0:
             return 0.0
 
         if nlevel is not None:
-            levels = items[:nlevel]
-            return sum(size for _, size in levels)
+            return float(arr[:nlevel, 1].sum())
         elif ticks is not None:
+            best_price = arr[0, 0]
+            if best_price <= 0:
+                return 0.0
             if side == "bid":
-                best_price = items[0][0]
-                if best_price <= 0:
-                    return 0.0
                 min_price = best_price - ticks * self.tick_size
-                levels = [(p, s) for p, s in items if p >= min_price]
+                return float(arr[arr[:, 0] >= min_price, 1].sum())
             else:
-                best_price = items[0][0]
-                if best_price <= 0:
-                    return 0.0
                 max_price = best_price + ticks * self.tick_size
-                levels = [(p, s) for p, s in items if p <= max_price]
-            return sum(size for _, size in levels)
+                return float(arr[arr[:, 0] <= max_price, 1].sum())
         elif price is not None:
             if side == "bid":
-                levels = [(p, s) for p, s in items if p >= price]
+                return float(arr[arr[:, 0] >= price, 1].sum())
             else:
-                levels = [(p, s) for p, s in items if p <= price]
-            return sum(size for _, size in levels)
+                return float(arr[arr[:, 0] <= price, 1].sum())
         else:
             raise ValueError("Must specify one of: nlevel, ticks, or price")
 

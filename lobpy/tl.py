@@ -7,97 +7,11 @@ import pandas as pd
 
 from .gueant import GueantAccessor
 from .lobts import LOBts
-
-# Mapping from period string to seconds
-_OHLC_PERIODS = {
-    "1s": 1,
-    "5s": 5,
-    "1m": 60,
-    "15m": 900,
-    "1h": 3_600,
-    "24h": 86_400,
-}
-
-_DEFAULT_NUM_BUCKETS = 50
-
-
-def _fill_buckets(trades, bucket_size, include_partial=False):
-    """
-    Partition a sorted list of Trade objects into fixed-volume buckets.
-
-    Each bucket accumulates exactly bucket_size total volume. Trades are split
-    across bucket boundaries when a single trade straddles two buckets.
-
-    Args:
-        trades:          List of Trade objects, sorted by timestamp.
-        bucket_size:     Target volume per bucket.
-        include_partial: If True, append the last partial bucket even if its
-                         total volume is less than bucket_size.
-
-    Returns:
-        pd.DataFrame indexed by bucket number with columns:
-            buy_volume  – volume from buy-aggressor trades
-            sell_volume – volume from sell-aggressor trades
-    """
-    buy_vols, sell_vols = [], []
-    current_buy = current_sell = 0.0
-    remaining = bucket_size
-
-    for trade in trades:
-        vol = trade.volume
-        while vol > 0:
-            fill = min(vol, remaining)
-            if trade.side == "b":
-                current_buy += fill
-            else:
-                current_sell += fill
-            vol -= fill
-            remaining -= fill
-            if remaining < 1e-12:
-                buy_vols.append(current_buy)
-                sell_vols.append(current_sell)
-                current_buy = current_sell = 0.0
-                remaining = bucket_size
-
-    if include_partial and (current_buy + current_sell) > 0:
-        buy_vols.append(current_buy)
-        sell_vols.append(current_sell)
-
-    return pd.DataFrame({"buy_volume": buy_vols, "sell_volume": sell_vols})
-
-
-def _vpin_from_buckets(df, bucket_size):
-    """Compute VPIN scalar from a volume-buckets DataFrame."""
-    if df.empty:
-        return float("nan")
-    n = len(df)
-    imbalance = (df["buy_volume"] - df["sell_volume"]).abs().sum()
-    return float(imbalance / (n * bucket_size))
-
-
-# Timestamp unit → number of units per second
-def _realized_vol(trades):
-    """
-    Compute realized volatility from a list of Trade objects.
-
-    Realized volatility = sqrt(sum of squared log returns), where log returns
-    are computed on trade prices sorted by timestamp.
-
-    Returns nan if fewer than 2 trades.
-    """
-    if len(trades) < 2:
-        return float("nan")
-    prices = [t.price for t in sorted(trades, key=lambda t: t.timestamp)]
-    log_returns = np.diff(np.log(prices))
-    return float(np.sqrt(np.sum(log_returns**2)))
-
-
-_TS_UNITS = {
-    "s": 1,
-    "ms": 1_000,
-    "us": 1_000_000,
-    "ns": 1_000_000_000,
-}
+from .ohlc import TS_UNITS as _TS_UNITS
+from .ohlc import ohlc as _ohlc_compute
+from .realized_volatility import realized_vol as _realized_vol_compute
+from .vpin import volume_buckets as _volume_buckets_compute
+from .vpin import vpin as _vpin_compute
 
 
 class Trade:
@@ -228,9 +142,9 @@ class TL:
         lob_rows = []
         for ts in self._lobts.timestamps:
             lob = self._lobts[ts]
-            for level, (price, size) in enumerate(lob._bids.items()):
+            for level, (price, size) in enumerate(lob._bids):
                 lob_rows.append((ts, "lob", "b", level, price, size))
-            for level, (price, size) in enumerate(lob._asks.items()):
+            for level, (price, size) in enumerate(lob._asks):
                 lob_rows.append((ts, "lob", "a", level, price, size))
 
         trade_rows = [
@@ -320,6 +234,21 @@ class TL:
         for ts in self.timestamps:
             yield ts, self[ts - window_size : ts]
 
+    def _rolling_trades_iter(self, window_size):
+        """
+        Yield (end_timestamp, trades_in_window) pairs using a two-pointer
+        sliding window over the sorted trade list.
+
+        O(N_trades) amortised — does not touch LOB data at all.
+        """
+        trades = sorted(self._trades, key=lambda t: t.timestamp)
+        left = 0
+        for right in range(len(trades)):
+            ts = trades[right].timestamp
+            while trades[left].timestamp < ts - window_size:
+                left += 1
+            yield ts, trades[left : right + 1]
+
     def ohlc(self, period):
         """
         Compute OHLC candles from trade data.
@@ -331,38 +260,10 @@ class TL:
             period: One of '1s', '5s', '1m', '15m', '1h', '24h'.
 
         Returns:
-            pd.DataFrame indexed by candle-open timestamp (ns) with columns:
+            pd.DataFrame indexed by candle-open timestamp with columns:
             open, high, low, close, volume, count.
         """
-        if period not in _OHLC_PERIODS:
-            raise ValueError(f"Unknown period '{period}'. Accepted: {list(_OHLC_PERIODS)}")
-        if not self._trades:
-            return pd.DataFrame(columns=["open", "high", "low", "close", "volume", "count"])
-
-        period_ts = _OHLC_PERIODS[period] * _TS_UNITS[self.timestamp_unit]
-        buckets = {}  # bucket_start -> list of Trade (insertion order = time order)
-        for trade in sorted(self._trades, key=lambda t: t.timestamp):
-            bucket = (trade.timestamp // period_ts) * period_ts
-            if bucket not in buckets:
-                buckets[bucket] = []
-            buckets[bucket].append(trade)
-
-        rows = {}
-        for bucket_ts in sorted(buckets):
-            trades = buckets[bucket_ts]
-            prices = [t.price for t in trades]
-            rows[bucket_ts] = {
-                "open": prices[0],
-                "high": max(prices),
-                "low": min(prices),
-                "close": prices[-1],
-                "volume": sum(t.volume for t in trades),
-                "count": len(trades),
-            }
-
-        df = pd.DataFrame.from_dict(rows, orient="index")
-        df.index.name = "timestamp"
-        return df
+        return _ohlc_compute(self._trades, period, self.timestamp_unit)
 
     def realized_vol(self, window_size=None):
         """
@@ -380,12 +281,12 @@ class TL:
         Returns:
             float (scalar) or pd.Series indexed by end timestamp.
         """
-        if window_size is None:
-            return _realized_vol(self._trades)
-        vals = {}
-        for ts, window in self._rolling_items(window_size):
-            vals[ts] = _realized_vol(window._trades)
-        return pd.Series(vals, name="realized_vol")
+
+        return _realized_vol_compute(
+            self._trades,
+            window_size=window_size,
+            rolling_items=self._rolling_trades_iter,
+        )
 
     def volume_buckets(self, bucket_size=None, include_partial=False):
         """
@@ -406,13 +307,7 @@ class TL:
                 buy_volume  – volume from buy-aggressor trades
                 sell_volume – volume from sell-aggressor trades
         """
-        trades = sorted(self._trades, key=lambda t: t.timestamp)
-        if not trades:
-            return pd.DataFrame(columns=["buy_volume", "sell_volume"])
-        if bucket_size is None:
-            total_vol = sum(t.volume for t in trades)
-            bucket_size = total_vol / _DEFAULT_NUM_BUCKETS
-        return _fill_buckets(trades, bucket_size, include_partial)
+        return _volume_buckets_compute(self._trades, bucket_size, include_partial)
 
     def vpin(self, window_size=None, bucket_size=None):
         """
@@ -433,26 +328,20 @@ class TL:
         Returns:
             float (scalar) or pd.Series indexed by end timestamp.
         """
-        if bucket_size is None:
-            total_vol = sum(t.volume for t in self._trades)
-            bucket_size = total_vol / _DEFAULT_NUM_BUCKETS if total_vol > 0 else 1.0
 
-        if window_size is None:
-            df = self.volume_buckets(bucket_size)
-            return _vpin_from_buckets(df, bucket_size)
-
-        vals = {}
-        for ts, window in self._rolling_items(window_size):
-            df = window.volume_buckets(bucket_size)
-            vals[ts] = _vpin_from_buckets(df, bucket_size)
-        return pd.Series(vals, name="vpin")
+        return _vpin_compute(
+            self._trades,
+            window_size=window_size,
+            bucket_size=bucket_size,
+            rolling_items=self._rolling_trades_iter,
+        )
 
     @property
     def gueant(self):
         """Accessor for Guéant intensity function parameters (λ(δ) = A·exp(-k·δ))."""
         return GueantAccessor(self)
 
-    def from_parquet(self, path):
+    def from_parquet(self, path, mode="eager"):
         """
         Load LOB and trade events from a parquet file into this TL instance.
 
@@ -475,7 +364,19 @@ class TL:
 
         Args:
             path: Path to the parquet file.
+            mode: 'eager' (default) loads everything into memory immediately.
+                  'lazy' stores only checkpoints + a delta log and reconstructs
+                  LOB snapshots on demand — dramatically lower memory usage for
+                  large files.
         """
+        if mode == "eager":
+            self._from_parquet_eager(path)
+        elif mode == "lazy":
+            self._from_parquet_lazy(path)
+        else:
+            raise ValueError(f"Unknown mode '{mode}'. Accepted: 'eager', 'lazy'")
+
+    def _from_parquet_eager(self, path):
         df = pd.read_parquet(path).sort_values("timestamp")
 
         _lob_side = {"bid": "b", "ask": "a"}
@@ -495,6 +396,86 @@ class TL:
 
             for r in group[group["event_type"] == "trade"].itertuples():
                 self.add_trade(ts, _trade_side[r.side], r.price, r.quantity)
+
+    def _from_parquet_lazy(self, path):
+        import pyarrow.compute as pc
+        import pyarrow.parquet as pq
+
+        from .lob import _make_ask_array, _make_bid_array
+        from .lobts import LOBts, _LAZY_DELTA_DTYPE
+
+        _lobts_mode = "latest" if self.lob_mode == "snapshot" else "lazy"
+        lazy_lobts = LOBts(name=self.name, tick_size=self.tick_size, mode=_lobts_mode)
+
+        table = pq.read_table(
+            path,
+            columns=["timestamp", "event_type", "side", "price", "quantity"],
+        )
+
+        # Sort by timestamp once upfront
+        table = table.sort_by("timestamp")
+
+        # Vectorised split by event type — no Python-level row iteration
+        et_col = table.column("event_type")
+        bl_table = table.filter(pc.equal(et_col, "book_level"))
+        bu_table = table.filter(pc.equal(et_col, "book_update"))
+        tr_table = table.filter(pc.equal(et_col, "trade"))
+
+        # --- book_update → delta log (fully vectorised, no per-row boxing) ---
+        if len(bu_table) > 0:
+            side_is_bid = pc.equal(bu_table.column("side"), "bid").to_numpy()
+            delta_log = np.empty(len(bu_table), dtype=_LAZY_DELTA_DTYPE)
+            delta_log["ts"]    = bu_table.column("timestamp").to_numpy()
+            delta_log["side"]  = np.where(side_is_bid, np.uint8(0), np.uint8(1))
+            delta_log["price"] = bu_table.column("price").to_numpy()
+            delta_log["qty"]   = bu_table.column("quantity").to_numpy()
+        else:
+            delta_log = np.empty(0, dtype=_LAZY_DELTA_DTYPE)
+
+        # --- trades (numeric columns via numpy, side via vectorised comparison) ---
+        if len(tr_table) > 0:
+            tr_ts    = tr_table.column("timestamp").to_numpy()
+            tr_buy   = pc.equal(tr_table.column("side"), "buy").to_numpy()
+            tr_price = tr_table.column("price").to_numpy()
+            tr_qty   = tr_table.column("quantity").to_numpy()
+            trade_rows = [
+                Trade(int(ts), "b" if buy else "s", float(p), float(q))
+                for ts, buy, p, q in zip(tr_ts, tr_buy, tr_price, tr_qty)
+            ]
+        else:
+            trade_rows = []
+
+        # --- book_level → checkpoints ---
+        # Group by timestamp using numpy (table is already timestamp-sorted so
+        # np.unique preserves order and gives contiguous group boundaries).
+        if len(bl_table) > 0:
+            bl_ts    = bl_table.column("timestamp").to_numpy()
+            bl_bid   = pc.equal(bl_table.column("side"), "bid").to_numpy()
+            bl_price = bl_table.column("price").to_numpy()
+            bl_qty   = bl_table.column("quantity").to_numpy()
+
+            unique_ts, first_idx = np.unique(bl_ts, return_index=True)
+            end_idx = np.append(first_idx[1:], len(bl_ts))
+
+            ckpts = {}
+            for ts_val, lo, hi in zip(unique_ts, first_idx, end_idx):
+                bid_mask = bl_bid[lo:hi]
+                bids = list(zip(bl_price[lo:hi][bid_mask].tolist(),
+                                bl_qty[lo:hi][bid_mask].tolist()))
+                asks = list(zip(bl_price[lo:hi][~bid_mask].tolist(),
+                                bl_qty[lo:hi][~bid_mask].tolist()))
+                ckpts[int(ts_val)] = (_make_bid_array(bids), _make_ask_array(asks))
+
+            # Assign in bulk — avoids O(N²) np.sort(np.append(...)) from set_snapshot
+            lazy_lobts._ckpts   = ckpts
+            lazy_lobts._ckpt_ts = unique_ts.astype(np.int64)  # np.unique output is sorted
+
+        lazy_lobts._delta_log = delta_log
+        if len(delta_log) > 0:
+            lazy_lobts.build_checkpoints()
+
+        self._lobts = lazy_lobts
+        self._trades = trade_rows
 
     def __repr__(self):
         return f"<TL[{self.name}] lob_snapshots={len(self._lobts)}" f" trades={len(self._trades)}>"
