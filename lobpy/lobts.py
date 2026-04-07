@@ -9,7 +9,9 @@ import numpy as np
 from .lob import LOB, _make_ask_array, _make_bid_array
 from .sorteddict import SortedDict
 
-_LAZY_DELTA_DTYPE = np.dtype([("ts", "i8"), ("side", "u1"), ("price", "f8"), ("qty", "f8")])
+_LAZY_DELTA_DTYPE: np.dtype = np.dtype(
+    [("ts", "i8"), ("side", "u1"), ("price", "f8"), ("qty", "f8")]
+)
 _CACHE_MAXSIZE = 32
 _AUTO_CHECKPOINTS = 100
 
@@ -36,9 +38,9 @@ class LOBts:
 
         if mode == "lazy":
             self._delta_log = np.empty(0, dtype=_LAZY_DELTA_DTYPE)
-            self._ckpt_ts = np.empty(0, dtype=np.int64)
-            self._ckpts = {}
-            self._cache = OrderedDict()
+            self._ckpt_ts: np.ndarray = np.empty(0, dtype=np.int64)
+            self._ckpts: dict[int, tuple[np.ndarray, np.ndarray]] = {}
+            self._cache: OrderedDict[int, LOB] = OrderedDict()
             self._ts_lo = None  # inclusive lower bound for timestamps view
             self._ts_hi = None  # inclusive upper bound for timestamps view
         else:

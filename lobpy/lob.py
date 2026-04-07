@@ -19,7 +19,7 @@ def _make_bid_array(levels) -> np.ndarray:
     if not len(levels):
         return np.empty((0, 2), dtype=np.float64)
     arr = np.array(levels, dtype=np.float64)
-    return arr[np.argsort(-arr[:, 0])]
+    return arr[np.argsort(-arr[:, 0])]  # type: ignore[no-any-return]
 
 
 def _make_ask_array(levels) -> np.ndarray:
@@ -27,7 +27,7 @@ def _make_ask_array(levels) -> np.ndarray:
     if not len(levels):
         return np.empty((0, 2), dtype=np.float64)
     arr = np.array(levels, dtype=np.float64)
-    return arr[np.argsort(arr[:, 0])]
+    return arr[np.argsort(arr[:, 0])]  # type: ignore[no-any-return]
 
 
 class _TopValueNumericMixin:
@@ -148,7 +148,6 @@ class VolumeImbalanceAccessor(_TopValueNumericMixin):
 
 
 class LOB:
-
     def __init__(self, name=None, tick_size=1, *, bids=None, asks=None) -> None:
         if name is None:
             name = f"lob{id(self)}"
@@ -507,8 +506,7 @@ class LOB:
             import pandas as pd  # type: ignore
         except ImportError as e:
             raise ImportError(
-                "pandas is required for to_pd() method. "
-                "Install it with: pip install pandas[export]"
+                "pandas is required for to_pd() method. Install it with: pip install pandas[export]"
             ) from e
 
         if side == "b":

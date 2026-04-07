@@ -94,5 +94,17 @@ module = "lobpy.sortedset"
 ignore_errors = true
 
 [[tool.mypy.overrides]]
+module = "pyarrow"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "pyarrow.compute"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "pyarrow.parquet"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
 module = "lobpy.sorteddict"
 ignore_errors = true
