@@ -402,7 +402,7 @@ class TL:
         import pyarrow.parquet as pq
 
         from .lob import _make_ask_array, _make_bid_array
-        from .lobts import LOBts, _LAZY_DELTA_DTYPE
+        from .lobts import _LAZY_DELTA_DTYPE, LOBts
 
         _lobts_mode = "latest" if self.lob_mode == "snapshot" else "lazy"
         lazy_lobts = LOBts(name=self.name, tick_size=self.tick_size, mode=_lobts_mode)

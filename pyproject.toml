@@ -61,6 +61,7 @@ target-version = ['py38', 'py39', 'py310', 'py311', 'py312']
 line-length = 100
 lint.select = ["E", "F", "I", "N", "W"]
 target-version = "py38"
+exclude = ["examples/itch.py"]
 
 [tool.ruff.lint.per-file-ignores]
 "lobpy/sortedlist.py" = ["N805"]
@@ -71,6 +72,7 @@ target-version = "py38"
 "lobpy/vpin.py" = ["N806"]
 "tests/test_tl.py" = ["N806"]
 "tests/test_vpin.py" = ["N806"]
+"lobpy/itch.py" = ["N801"]
 "examples/timeline.py" = ["N806"]
 "examples/real_timeline.py" = ["N806"]
 

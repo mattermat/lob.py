@@ -163,7 +163,9 @@ class TestLazyGetItemExactCheckpoint:
 
     def test_exact_checkpoint_returns_lob(self):
         lobts = LOBts(mode="lazy")
-        lobts.set_snapshot([(100.0, 10.0), (99.0, 5.0)], [(101.0, 8.0), (102.0, 4.0)], timestamp=1000)
+        lobts.set_snapshot(
+            [(100.0, 10.0), (99.0, 5.0)], [(101.0, 8.0), (102.0, 4.0)], timestamp=1000
+        )
 
         lob = lobts[1000]
         assert lob is not None
@@ -231,7 +233,9 @@ class TestLazyGetItemBetweenCheckpoints:
     def test_multiple_deltas_applied(self):
         lobts = LOBts(mode="lazy")
         lobts.set_snapshot([(100.0, 10.0)], [(101.0, 8.0)], timestamp=1000)
-        lobts.set_updates([("b", 100.0, 20.0), ("a", 101.0, 4.0), ("a", 103.0, 2.0)], timestamp=1500)
+        lobts.set_updates(
+            [("b", 100.0, 20.0), ("a", 101.0, 4.0), ("a", 103.0, 2.0)], timestamp=1500
+        )
 
         lob = lobts[1500]
         assert lob.bidq[0] == 20.0
@@ -279,7 +283,9 @@ class TestLazyReconstructionVsEager:
 
     def _build_eager(self):
         lobts = LOBts(mode="delta")
-        lobts.set_snapshot([(100.0, 10.0), (99.0, 5.0)], [(101.0, 8.0), (102.0, 4.0)], timestamp=1000)
+        lobts.set_snapshot(
+            [(100.0, 10.0), (99.0, 5.0)], [(101.0, 8.0), (102.0, 4.0)], timestamp=1000
+        )
         lobts.set_updates([("b", 100.0, 15.0), ("a", 101.0, 0.0)], timestamp=1500)
         lobts.set_snapshot([(95.0, 20.0)], [(105.0, 10.0)], timestamp=2000)
         lobts.set_updates([("b", 95.0, 25.0), ("a", 106.0, 3.0)], timestamp=2500)
@@ -287,7 +293,9 @@ class TestLazyReconstructionVsEager:
 
     def _build_lazy(self):
         lobts = LOBts(mode="lazy")
-        lobts.set_snapshot([(100.0, 10.0), (99.0, 5.0)], [(101.0, 8.0), (102.0, 4.0)], timestamp=1000)
+        lobts.set_snapshot(
+            [(100.0, 10.0), (99.0, 5.0)], [(101.0, 8.0), (102.0, 4.0)], timestamp=1000
+        )
         lobts.set_updates([("b", 100.0, 15.0), ("a", 101.0, 0.0)], timestamp=1500)
         lobts.set_snapshot([(95.0, 20.0)], [(105.0, 10.0)], timestamp=2000)
         lobts.set_updates([("b", 95.0, 25.0), ("a", 106.0, 3.0)], timestamp=2500)

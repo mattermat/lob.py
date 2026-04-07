@@ -103,5 +103,6 @@ for msg in parser.messages():
         case _:
             print(msg)
             break
-    print(i)
+    if (i % 100) == 0:
+        print(i)
     i += 1

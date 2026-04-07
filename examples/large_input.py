@@ -9,8 +9,9 @@ Run from the repo root:
     python examples/large_input.py
 """
 
-from lobpy import TL
 import time
+
+from lobpy import TL
 
 PATH = "test_data/blofin_BTC-USDT_20260330_194305.parquet"
 WINDOW = 30_000_000_000  # 30 s in nanoseconds

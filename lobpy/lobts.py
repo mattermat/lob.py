@@ -6,7 +6,7 @@ from collections import OrderedDict
 
 import numpy as np
 
-from .lob import LOB, _make_bid_array, _make_ask_array
+from .lob import LOB, _make_ask_array, _make_bid_array
 from .sorteddict import SortedDict
 
 _LAZY_DELTA_DTYPE = np.dtype([("ts", "i8"), ("side", "u1"), ("price", "f8"), ("qty", "f8")])
@@ -84,7 +84,9 @@ class LOBts:
         """
         if self._mode == "lazy":
             if timestamp in self._ckpts and not force:
-                raise ValueError(f"Timestamp {timestamp} already exists. Use force=True to overwrite.")
+                raise ValueError(
+                    f"Timestamp {timestamp} already exists. Use force=True to overwrite."
+                )
             self._ckpts[timestamp] = (_make_bid_array(bids), _make_ask_array(asks))
             if timestamp not in self._ckpt_ts:
                 self._ckpt_ts = np.sort(np.append(self._ckpt_ts, np.int64(timestamp)))
@@ -310,7 +312,11 @@ class LOBts:
             # Copy delta rows from anchor onwards (up to end_ts)
             if len(self._delta_log) > 0:
                 lo = int(np.searchsorted(self._delta_log["ts"], lo_ts)) if lo_ts is not None else 0
-                hi = int(np.searchsorted(self._delta_log["ts"], end_ts, side="right")) if end_ts is not None else len(self._delta_log)
+                hi = (
+                    int(np.searchsorted(self._delta_log["ts"], end_ts, side="right"))
+                    if end_ts is not None
+                    else len(self._delta_log)
+                )
                 result._delta_log = self._delta_log[lo:hi].copy()
 
             # Restrict what timestamps reports to the user-requested range
@@ -507,7 +513,9 @@ class LOBts:
                     continue
                 if end_ts is not None and ts > end_ts:
                     break
-                yield ts, {float(p): float(q) for p, q in lob._bids}, {float(p): float(q) for p, q in lob._asks}
+                bids = {float(p): float(q) for p, q in lob._bids}
+                asks = {float(p): float(q) for p, q in lob._asks}
+                yield ts, bids, asks
             return
 
         # Lazy mode: same forward-pass structure as _seq_extract_best
@@ -556,7 +564,11 @@ class LOBts:
                 bids_arr, asks_arr = self._ckpts[t]
                 bid_dict = {float(p): float(q) for p, q in bids_arr}
                 ask_dict = {float(p): float(q) for p, q in asks_arr}
-                delta_idx = int(np.searchsorted(deltas["ts"], t, side="left")) if len(deltas) > 0 else 0
+                delta_idx = (
+                    int(np.searchsorted(deltas["ts"], t, side="left"))
+                    if len(deltas) > 0
+                    else 0
+                )
 
             while delta_idx < len(deltas) and deltas["ts"][delta_idx] == t:
                 side_int = int(deltas["side"][delta_idx])

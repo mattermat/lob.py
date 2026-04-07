@@ -12,7 +12,6 @@ from collections import defaultdict, deque
 import numpy as np
 import pandas as pd
 
-
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
@@ -110,13 +109,13 @@ def _precompute(tl, side):
     return lob_states, intervals, trade_deltas
 
 
-def _assemble_raw(N_counts, T_vec, MAX_D):
+def _assemble_raw(n_counts, t_vec, max_d):
     """Build raw λ̂(δ) DataFrame from N dict and T numpy vector."""
-    all_d = sorted(set(N_counts.keys()) | set(int(x) for x in np.nonzero(T_vec)[0]))
+    all_d = sorted(set(n_counts.keys()) | set(int(x) for x in np.nonzero(t_vec)[0]))
     rows = []
     for d in all_d:
-        n = N_counts.get(d, 0)
-        t = float(T_vec[d]) if d < MAX_D else 0.0
+        n = n_counts.get(d, 0)
+        t = float(t_vec[d]) if d < max_d else 0.0
         lam = n / t if t > 0 and n > 0 else float("nan")
         rows.append((d, n, t, lam))
     return pd.DataFrame(rows, columns=["delta", "N", "T", "lambda"])
@@ -303,18 +302,18 @@ def _compute_rolling_gueant(tl, side, window_size, buckets=None):
                 del N_window[old_d]
 
         # T(δ) for window [lo, ts] via cumsum
-        l = int(np.searchsorted(intervals_end,   lo, side="right"))
-        r = int(np.searchsorted(intervals_start, ts, side="right"))
+        left = int(np.searchsorted(intervals_end, lo, side="right"))
+        right = int(np.searchsorted(intervals_start, ts, side="right"))
 
-        if l >= r:
+        if left >= right:
             A_vals[ts] = nan
             k_vals[ts] = nan
             continue
 
-        T_vec = T_cumsum[r] - T_cumsum[l]  # new array from subtraction
+        T_vec = T_cumsum[right] - T_cumsum[left]  # new array from subtraction
 
         # Correct boundary clipping for the left and right edge intervals
-        for b in set([l, r - 1]):
+        for b in set([left, right - 1]):
             if 0 <= b < n_intervals:
                 ts_s, ts_e, dur, dc = intervals[b]
                 clipped = int(min(ts_e, ts)) - int(max(ts_s, lo))
@@ -356,7 +355,11 @@ def _compute_rolling_gueant(tl, side, window_size, buckets=None):
                 continue
             n_d = len(all_d)
             N_arr = np.fromiter((N_window.get(d, 0) for d in all_d), dtype=np.float64, count=n_d)
-            T_arr = np.fromiter((T_vec[d] if d < MAX_D else 0.0 for d in all_d), dtype=np.float64, count=n_d)
+            T_arr = np.fromiter(
+                (T_vec[d] if d < MAX_D else 0.0 for d in all_d),
+                dtype=np.float64,
+                count=n_d,
+            )
             valid = (T_arr > 0) & (N_arr > 0)
             if valid.sum() < 2:
                 A_vals[ts] = nan
