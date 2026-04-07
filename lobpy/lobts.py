@@ -416,11 +416,13 @@ class LOBts:
 
         # Slice the delta log to the relevant window
         if len(self._delta_log) > 0:
-            lo = int(np.searchsorted(
-                self._delta_log["ts"],
-                anchor_ts if anchor_ts is not None else first_ts,
-                side="left",
-            ))
+            lo = int(
+                np.searchsorted(
+                    self._delta_log["ts"],
+                    anchor_ts if anchor_ts is not None else first_ts,
+                    side="left",
+                )
+            )
             hi = int(np.searchsorted(self._delta_log["ts"], last_ts, side="right"))
             deltas = self._delta_log[lo:hi]
         else:
@@ -433,12 +435,13 @@ class LOBts:
         n_deltas = len(deltas)
         ckpt_delta_pos: dict = {}
         if n_deltas > 0:
-            dl_ts    = deltas["ts"]
-            dl_side  = deltas["side"]
+            dl_ts = deltas["ts"]
+            dl_side = deltas["side"]
             dl_price = deltas["price"]
-            dl_qty   = deltas["qty"]
-            ckpts_in_range = [ts for ts in ckpt_set if ts != anchor_ts
-                              and first_ts <= ts <= last_ts]
+            dl_qty = deltas["qty"]
+            ckpts_in_range = [
+                ts for ts in ckpt_set if ts != anchor_ts and first_ts <= ts <= last_ts
+            ]
             if ckpts_in_range:
                 positions = np.searchsorted(dl_ts, ckpts_in_range, side="left")
                 ckpt_delta_pos = dict(zip(ckpts_in_range, positions.tolist()))
@@ -471,7 +474,7 @@ class LOBts:
             # Apply all deltas at timestamp t; n_deltas cached to avoid len() per iteration
             while delta_idx < n_deltas and dl_ts[delta_idx] == t:
                 price = float(dl_price[delta_idx])
-                qty   = float(dl_qty[delta_idx])
+                qty = float(dl_qty[delta_idx])
                 if int(dl_side[delta_idx]) == 0:  # bid
                     if qty == 0.0:
                         bid_dict.pop(price, None)
@@ -546,11 +549,13 @@ class LOBts:
             ask_dict = {}
 
         if len(self._delta_log) > 0:
-            lo = int(np.searchsorted(
-                self._delta_log["ts"],
-                anchor_ts if anchor_ts is not None else first_ts,
-                side="left",
-            ))
+            lo = int(
+                np.searchsorted(
+                    self._delta_log["ts"],
+                    anchor_ts if anchor_ts is not None else first_ts,
+                    side="left",
+                )
+            )
             hi = int(np.searchsorted(self._delta_log["ts"], last_ts, side="right"))
             deltas = self._delta_log[lo:hi]
         else:
@@ -565,9 +570,7 @@ class LOBts:
                 bid_dict = {float(p): float(q) for p, q in bids_arr}
                 ask_dict = {float(p): float(q) for p, q in asks_arr}
                 delta_idx = (
-                    int(np.searchsorted(deltas["ts"], t, side="left"))
-                    if len(deltas) > 0
-                    else 0
+                    int(np.searchsorted(deltas["ts"], t, side="left")) if len(deltas) > 0 else 0
                 )
 
             while delta_idx < len(deltas) and deltas["ts"][delta_idx] == t:
@@ -625,10 +628,10 @@ class LOBts:
         next_pos = next(pos_iter, None)
 
         # Extract column views once — avoids per-iteration structured-array field lookup
-        dl_ts    = self._delta_log["ts"]
-        dl_side  = self._delta_log["side"]
+        dl_ts = self._delta_log["ts"]
+        dl_side = self._delta_log["side"]
         dl_price = self._delta_log["price"]
-        dl_qty   = self._delta_log["qty"]
+        dl_qty = self._delta_log["qty"]
         # Cache the anchor timestamp to avoid repeated len() + indexing inside the loop
         first_ckpt_ts = int(self._ckpt_ts[0]) if len(self._ckpt_ts) > 0 else None
 
@@ -691,8 +694,11 @@ class LOBts:
         if self._mode == "lazy":
             ts_list, bids, asks, _, _ = self._seq_extract_best(start_ts, end_ts)
             import math
-            spreads = [a - b if not math.isnan(a) and not math.isnan(b) else float("nan")
-                       for b, a in zip(bids, asks)]
+
+            spreads = [
+                a - b if not math.isnan(a) and not math.isnan(b) else float("nan")
+                for b, a in zip(bids, asks)
+            ]
             return pd.Series(spreads, index=ts_list, name="spread")
 
         spreads = []
@@ -726,8 +732,11 @@ class LOBts:
         if self._mode == "lazy":
             ts_list, bids, asks, _, _ = self._seq_extract_best(start_ts, end_ts)
             import math
-            midprices = [(b + a) / 2 if not math.isnan(b) and not math.isnan(a) else float("nan")
-                         for b, a in zip(bids, asks)]
+
+            midprices = [
+                (b + a) / 2 if not math.isnan(b) and not math.isnan(a) else float("nan")
+                for b, a in zip(bids, asks)
+            ]
             return pd.Series(midprices, index=ts_list, name="midprice")
 
         midprices = []
@@ -919,6 +928,7 @@ class LOBts:
             ask_size = lob.askq[0]
             if bid_size + ask_size == 0:
                 import math
+
                 vw_midprices.append(math.nan)
             else:
                 vw_midprices.append(

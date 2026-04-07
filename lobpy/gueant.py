@@ -16,6 +16,7 @@ import pandas as pd
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+
 def _delta_contribs(bid_dict, ask_dict, side, tick_size):
     """
     Return {delta: level_count} for one LOB snapshot.
@@ -180,6 +181,7 @@ def _fit(buckets):
 # Scalar (full-timeline) computation
 # ---------------------------------------------------------------------------
 
+
 def _compute_buckets(tl, side):
     """
     Compute empirical intensity buckets λ̂(δ) = N(δ) / T(δ) for one side.
@@ -212,8 +214,12 @@ def _compute_buckets(tl, side):
 
     all_deltas = sorted(set(N) | set(T))
     rows = [
-        (d, N.get(d, 0), T.get(d, 0.0),
-         N[d] / T[d] if T.get(d, 0.0) > 0 and N.get(d, 0) > 0 else float("nan"))
+        (
+            d,
+            N.get(d, 0),
+            T.get(d, 0.0),
+            N[d] / T[d] if T.get(d, 0.0) > 0 and N.get(d, 0) > 0 else float("nan"),
+        )
         for d in all_deltas
     ]
     return pd.DataFrame(rows, columns=["delta", "N", "T", "lambda"])
@@ -222,6 +228,7 @@ def _compute_buckets(tl, side):
 # ---------------------------------------------------------------------------
 # Rolling computation
 # ---------------------------------------------------------------------------
+
 
 def _compute_rolling_gueant(tl, side, window_size, buckets=None):
     """
@@ -241,14 +248,17 @@ def _compute_rolling_gueant(tl, side, window_size, buckets=None):
         return pd.Series(name=f"gueant_A_{side}"), pd.Series(name=f"gueant_k_{side}")
 
     # Determine MAX_D for array sizing
-    MAX_D = max(
-        max((max(dc.keys(), default=0) for _, _, _, dc in intervals), default=0),
-        max((d for _, d in trade_deltas), default=0),
-    ) + 1
+    MAX_D = (
+        max(
+            max((max(dc.keys(), default=0) for _, _, _, dc in intervals), default=0),
+            max((d for _, d in trade_deltas), default=0),
+        )
+        + 1
+    )
 
     # numpy arrays for fast binary search
     intervals_start = np.array([iv[0] for iv in intervals], dtype=np.int64)
-    intervals_end   = np.array([iv[1] for iv in intervals], dtype=np.int64)
+    intervals_end = np.array([iv[1] for iv in intervals], dtype=np.int64)
 
     # Cumsum matrix: T_cumsum[i] = Σ_{j < i} duration_j × delta_counts_j
     # T(δ) for intervals [l, r) ≈ T_cumsum[r] - T_cumsum[l]
@@ -333,10 +343,9 @@ def _compute_rolling_gueant(tl, side, window_size, buckets=None):
                     N_agg[idx] += count
 
             # Sum T_vec slices for each bucket
-            T_agg = np.array([
-                T_vec[lo_i:min(hi_i, MAX_D)].sum()
-                for lo_i, hi_i in zip(_bkt_lo, _bkt_hi)
-            ])
+            T_agg = np.array(
+                [T_vec[lo_i : min(hi_i, MAX_D)].sum() for lo_i, hi_i in zip(_bkt_lo, _bkt_hi)]
+            )
 
             valid = (T_agg > 0) & (N_agg > 0)
             if valid.sum() < 2:
@@ -382,6 +391,7 @@ def _compute_rolling_gueant(tl, side, window_size, buckets=None):
 # ---------------------------------------------------------------------------
 # Public accessor
 # ---------------------------------------------------------------------------
+
 
 class GueantAccessor:
     """

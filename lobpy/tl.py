@@ -425,19 +425,19 @@ class TL:
         if len(bu_table) > 0:
             side_is_bid = pc.equal(bu_table.column("side"), "bid").to_numpy()
             delta_log = np.empty(len(bu_table), dtype=_LAZY_DELTA_DTYPE)
-            delta_log["ts"]    = bu_table.column("timestamp").to_numpy()
-            delta_log["side"]  = np.where(side_is_bid, np.uint8(0), np.uint8(1))
+            delta_log["ts"] = bu_table.column("timestamp").to_numpy()
+            delta_log["side"] = np.where(side_is_bid, np.uint8(0), np.uint8(1))
             delta_log["price"] = bu_table.column("price").to_numpy()
-            delta_log["qty"]   = bu_table.column("quantity").to_numpy()
+            delta_log["qty"] = bu_table.column("quantity").to_numpy()
         else:
             delta_log = np.empty(0, dtype=_LAZY_DELTA_DTYPE)
 
         # --- trades (numeric columns via numpy, side via vectorised comparison) ---
         if len(tr_table) > 0:
-            tr_ts    = tr_table.column("timestamp").to_numpy()
-            tr_buy   = pc.equal(tr_table.column("side"), "buy").to_numpy()
+            tr_ts = tr_table.column("timestamp").to_numpy()
+            tr_buy = pc.equal(tr_table.column("side"), "buy").to_numpy()
             tr_price = tr_table.column("price").to_numpy()
-            tr_qty   = tr_table.column("quantity").to_numpy()
+            tr_qty = tr_table.column("quantity").to_numpy()
             trade_rows = [
                 Trade(int(ts), "b" if buy else "s", float(p), float(q))
                 for ts, buy, p, q in zip(tr_ts, tr_buy, tr_price, tr_qty)
@@ -449,10 +449,10 @@ class TL:
         # Group by timestamp using numpy (table is already timestamp-sorted so
         # np.unique preserves order and gives contiguous group boundaries).
         if len(bl_table) > 0:
-            bl_ts    = bl_table.column("timestamp").to_numpy()
-            bl_bid   = pc.equal(bl_table.column("side"), "bid").to_numpy()
+            bl_ts = bl_table.column("timestamp").to_numpy()
+            bl_bid = pc.equal(bl_table.column("side"), "bid").to_numpy()
             bl_price = bl_table.column("price").to_numpy()
-            bl_qty   = bl_table.column("quantity").to_numpy()
+            bl_qty = bl_table.column("quantity").to_numpy()
 
             unique_ts, first_idx = np.unique(bl_ts, return_index=True)
             end_idx = np.append(first_idx[1:], len(bl_ts))
@@ -460,14 +460,16 @@ class TL:
             ckpts = {}
             for ts_val, lo, hi in zip(unique_ts, first_idx, end_idx):
                 bid_mask = bl_bid[lo:hi]
-                bids = list(zip(bl_price[lo:hi][bid_mask].tolist(),
-                                bl_qty[lo:hi][bid_mask].tolist()))
-                asks = list(zip(bl_price[lo:hi][~bid_mask].tolist(),
-                                bl_qty[lo:hi][~bid_mask].tolist()))
+                bids = list(
+                    zip(bl_price[lo:hi][bid_mask].tolist(), bl_qty[lo:hi][bid_mask].tolist())
+                )
+                asks = list(
+                    zip(bl_price[lo:hi][~bid_mask].tolist(), bl_qty[lo:hi][~bid_mask].tolist())
+                )
                 ckpts[int(ts_val)] = (_make_bid_array(bids), _make_ask_array(asks))
 
             # Assign in bulk — avoids O(N²) np.sort(np.append(...)) from set_snapshot
-            lazy_lobts._ckpts   = ckpts
+            lazy_lobts._ckpts = ckpts
             lazy_lobts._ckpt_ts = unique_ts.astype(np.int64)  # np.unique output is sorted
 
         lazy_lobts._delta_log = delta_log

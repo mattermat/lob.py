@@ -2595,5 +2595,6 @@ class TestTLFromParquet:
         path = _make_parquet(tmp_path, rows)
         tl = TL()
         import pytest
+
         with pytest.raises(ValueError, match="Unknown mode"):
             tl.from_parquet(path, mode="invalid")

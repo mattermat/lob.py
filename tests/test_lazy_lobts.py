@@ -573,7 +573,6 @@ class TestLazyNoCrossContamination:
         assert not hasattr(lobts, "_lobs")
 
 
-
 class TestExistingDeltaModeUnaffected:
     """Test 15: mode='delta' (default) is completely unaffected."""
 
