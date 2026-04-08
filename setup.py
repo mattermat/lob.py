@@ -11,13 +11,20 @@ def read_file(fname):
 
 setup(
     name="lobpy",
-    version="1.1.0",
+    version="1.2.0",
     author="Mattia",
     description="Limit Order Book in Python",
     long_description=read_file("README.md"),
     long_description_content_type="text/markdown",
     url="https://github.com/mattermat/lob.py",
     packages=find_packages(),
+    setup_requires=["cffi>=1.0.0"],
+    cffi_modules=["lobpy/_cext/build.py:ffibuilder"],
+    install_requires=[
+        "numpy>=1.20.0",
+        "pandas>=1.3.0",
+        "cffi>=1.0.0",
+    ],
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Intended Audience :: Developers",
@@ -33,10 +40,6 @@ setup(
         "Programming Language :: Python :: 3.12",
     ],
     python_requires=">=3.8",
-    install_requires=[
-        "numpy>=1.20.0",
-        "pandas>=1.3.0",
-    ],
     keywords="limit order book lob trading finance",
     project_urls={
         "Bug Reports": "https://github.com/mattermat/lob.py/issues",
