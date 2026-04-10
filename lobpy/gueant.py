@@ -12,6 +12,8 @@ from collections import defaultdict, deque
 import numpy as np
 import pandas as pd
 
+from lobpy._cext import ffi, lib
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
@@ -78,7 +80,7 @@ def _precompute(tl, side):
 
     end_ts = max(
         lob_states[-1][0],
-        max((t.timestamp for t in tl._trades), default=lob_states[-1][0]),
+        max((t.timestamp for t in tl.trades), default=lob_states[-1][0]),
     )
 
     # LOB intervals
@@ -94,7 +96,7 @@ def _precompute(tl, side):
     # Trade deltas (binary search into lob_states)
     lob_ts_arr = np.array([s[0] for s in lob_states])
     relevant_trades = sorted(
-        (t for t in tl._trades if t.side == trade_side_str),
+        (t for t in tl.trades if t.side == trade_side_str),
         key=lambda t: t.timestamp,
     )
     trade_deltas = []
@@ -286,7 +288,7 @@ def _compute_rolling_gueant(tl, side, window_size, buckets=None):
         _bkt_hi = np.array([t + 1 for t in _thresholds], dtype=np.intp)
 
     # All timestamps (LOB + trades), matching the old contract of one value per event
-    all_ts = sorted(set(tl._lobts.timestamps) | {t.timestamp for t in tl._trades})
+    all_ts = sorted(set(tl._lobts.timestamps) | {t.timestamp for t in tl.trades})
 
     # Sliding deque for N(δ) — advanced as all_ts progresses
     N_window: dict = defaultdict(int)
@@ -389,6 +391,95 @@ def _compute_rolling_gueant(tl, side, window_size, buckets=None):
 
 
 # ---------------------------------------------------------------------------
+# C-backed rolling computation (bucketed mode)
+# ---------------------------------------------------------------------------
+
+
+def _compute_rolling_gueant_c(tl, side, window_size, buckets):
+    """
+    C-backed rolling Guéant (A, k) at every LOB + trade timestamp.
+
+    Requires buckets to be set (list of integer delta thresholds).
+    Only valid for lazy-mode LOBts; caller should check tl._lobts._mode == "lazy".
+    """
+    lobts = tl._lobts
+    thresholds_int = sorted(int(t) for t in buckets)
+    n_buckets = len(thresholds_int)
+    thresholds_arr = np.asarray(thresholds_int, dtype=np.int32)
+    gueant_side = 0 if side == "a" else 1
+
+    # --- LOB CSR state arrays ---
+    lob_ts, bid_offs, ask_offs, bid_data, ask_data = lobts._seq_states_csr()
+    n_lob = len(lob_ts)
+    if n_lob == 0:
+        side_name = "ask" if side == "a" else "bid"
+        return (pd.Series(name=f"gueant_A_{side_name}"),
+                pd.Series(name=f"gueant_k_{side_name}"))
+
+    # --- Trade arrays ---
+    trades = tl.trades
+    n_trades = len(trades)
+    if n_trades > 0:
+        trade_ts_arr     = np.array([t.timestamp for t in trades], dtype=np.int64)
+        trade_prices_arr = np.array([t.price     for t in trades], dtype=np.float64)
+        # side encoding: 'b' = buy aggressor (hits ask) → 0; 's' = sell aggressor → 1
+        trade_sides_arr  = np.array(
+            [0 if t.side == "b" else 1 for t in trades], dtype=np.uint8
+        )
+        max_trade_ts = int(trade_ts_arr[-1])
+    else:
+        trade_ts_arr = trade_prices_arr = trade_sides_arr = np.empty(0)
+        trade_ts_arr = trade_ts_arr.view(np.int64)
+        trade_prices_arr = trade_prices_arr.astype(np.float64)
+        trade_sides_arr  = trade_sides_arr.astype(np.uint8)
+        max_trade_ts = int(lob_ts[-1])
+
+    end_ts = max(int(lob_ts[-1]), max_trade_ts)
+
+    # --- Query timestamps = sorted union of LOB ts and trade ts ---
+    all_ts_set = set(lob_ts.tolist())
+    if n_trades > 0:
+        all_ts_set |= set(trade_ts_arr.tolist())
+    all_ts = np.asarray(sorted(all_ts_set), dtype=np.int64)
+    n_all_ts = len(all_ts)
+
+    # --- Allocate output arrays ---
+    out_A = np.empty(n_all_ts, dtype=np.float64)
+    out_k = np.empty(n_all_ts, dtype=np.float64)
+
+    def _p(arr, ct):
+        return ffi.cast(ct, arr.ctypes.data)
+
+    lib.gueant_rolling_buckets(
+        _p(lob_ts,          "const long long *"), n_lob,
+        _p(bid_offs,        "const int *"),
+        _p(bid_data,        "const double *") if len(bid_data) > 0 else ffi.NULL,
+        _p(ask_offs,        "const int *"),
+        _p(ask_data,        "const double *") if len(ask_data) > 0 else ffi.NULL,
+        end_ts,
+        _p(trade_ts_arr,    "const long long *") if n_trades > 0 else ffi.NULL,
+        _p(trade_prices_arr,"const double *")    if n_trades > 0 else ffi.NULL,
+        _p(trade_sides_arr, "const uint8_t *")   if n_trades > 0 else ffi.NULL,
+        n_trades,
+        float(tl.tick_size),
+        gueant_side,
+        int(window_size),
+        _p(thresholds_arr,  "const int *"),
+        n_buckets,
+        _p(all_ts,          "const long long *"), n_all_ts,
+        _p(out_A,           "double *"),
+        _p(out_k,           "double *"),
+    )
+
+    side_name = "ask" if side == "a" else "bid"
+    idx = all_ts.tolist()
+    return (
+        pd.Series(out_A, index=idx, name=f"gueant_A_{side_name}"),
+        pd.Series(out_k, index=idx, name=f"gueant_k_{side_name}"),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Public accessor
 # ---------------------------------------------------------------------------
 
@@ -443,6 +534,8 @@ class GueantAccessor:
             raw = _compute_buckets(self._tl, "a")
             agg = _aggregate_buckets(raw, buckets) if buckets is not None else raw
             return _fit(agg)
+        if buckets is not None and self._tl._lobts._mode == "lazy":
+            return _compute_rolling_gueant_c(self._tl, "a", window_size, buckets)
         return _compute_rolling_gueant(self._tl, "a", window_size, buckets)
 
     def bid(self, window_size=None, buckets=None):
@@ -462,4 +555,6 @@ class GueantAccessor:
             raw = _compute_buckets(self._tl, "b")
             agg = _aggregate_buckets(raw, buckets) if buckets is not None else raw
             return _fit(agg)
+        if buckets is not None and self._tl._lobts._mode == "lazy":
+            return _compute_rolling_gueant_c(self._tl, "b", window_size, buckets)
         return _compute_rolling_gueant(self._tl, "b", window_size, buckets)

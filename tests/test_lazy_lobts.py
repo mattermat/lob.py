@@ -247,15 +247,18 @@ class TestLazyGetItemMultipleCheckpoints:
     """Test 6: with 3+ checkpoints, lookup picks the nearest preceding one."""
 
     def test_picks_nearest_preceding_checkpoint(self):
+        # Two checkpoints at 1000 and 2000; delta at 2500.
+        # Reconstruction at 2500 must use checkpoint at 2000 (not 1000).
         lobts = LOBts(mode="lazy")
         lobts.set_snapshot([(100.0, 10.0)], [(101.0, 8.0)], timestamp=1000)
         lobts.set_snapshot([(95.0, 15.0)], [(106.0, 12.0)], timestamp=2000)
-        lobts.set_snapshot([(90.0, 20.0)], [(110.0, 15.0)], timestamp=3000)
+        lobts.set_updates([("b", 95.0, 99.0)], timestamp=2500)
 
         lob = lobts[2500]
         assert lob is not None
+        # If the wrong checkpoint (1000) was used the bid would be 100.0
         assert lob.bid[0] == 95.0
-        assert lob.ask[0] == 106.0
+        assert lob.bidq[0] == 99.0
 
     def test_deltas_after_correct_checkpoint(self):
         lobts = LOBts(mode="lazy")
@@ -282,7 +285,7 @@ class TestLazyReconstructionVsEager:
     """Test 7: compare lazy output against eagerly-built LOB."""
 
     def _build_eager(self):
-        lobts = LOBts(mode="delta")
+        lobts = LOBts(mode="eager")
         lobts.set_snapshot(
             [(100.0, 10.0), (99.0, 5.0)], [(101.0, 8.0), (102.0, 4.0)], timestamp=1000
         )
@@ -573,45 +576,49 @@ class TestLazyNoCrossContamination:
         assert not hasattr(lobts, "_lobs")
 
 
-class TestExistingDeltaModeUnaffected:
-    """Test 15: mode='delta' (default) is completely unaffected."""
+class TestEagerMode:
+    """Test 15: mode='eager' stores all snapshots eagerly in C memory."""
 
-    def test_delta_mode_still_default(self):
+    def test_lazy_mode_is_default(self):
         lobts = LOBts()
-        assert lobts.mode == "delta"
+        assert lobts.mode == "lazy"
 
-    def test_delta_set_snapshot(self):
-        lobts = LOBts()
+    def test_eager_mode_explicit(self):
+        lobts = LOBts(mode="eager")
+        assert lobts.mode == "eager"
+
+    def test_eager_set_snapshot(self):
+        lobts = LOBts(mode="eager")
         lobts.set_snapshot([(100.0, 10.0)], [(101.0, 8.0)], timestamp=1000)
         assert lobts[1000] is not None
         assert lobts[1000].bid[0] == 100.0
 
-    def test_delta_set_updates(self):
-        lobts = LOBts()
+    def test_eager_set_updates(self):
+        lobts = LOBts(mode="eager")
         lobts.set_snapshot([(100.0, 10.0)], [(101.0, 8.0)], timestamp=1000)
         lobts.set_updates([("b", 100.0, 15.0)], timestamp=2000)
         assert lobts[2000].bidq[0] == 15.0
 
-    def test_delta_len(self):
-        lobts = LOBts()
+    def test_eager_len(self):
+        lobts = LOBts(mode="eager")
         lobts.set_snapshot([(100.0, 10.0)], [(101.0, 8.0)], timestamp=1000)
         lobts.set_updates([("b", 100.0, 15.0)], timestamp=2000)
         assert len(lobts) == 2
 
-    def test_delta_contains(self):
-        lobts = LOBts()
+    def test_eager_contains(self):
+        lobts = LOBts(mode="eager")
         lobts.set_snapshot([(100.0, 10.0)], [(101.0, 8.0)], timestamp=1000)
         assert 1000 in lobts
         assert 2000 not in lobts
 
-    def test_delta_timestamps(self):
-        lobts = LOBts()
+    def test_eager_timestamps(self):
+        lobts = LOBts(mode="eager")
         lobts.set_snapshot([(100.0, 10.0)], [(101.0, 8.0)], timestamp=2000)
         lobts.set_snapshot([(95.0, 15.0)], [(106.0, 12.0)], timestamp=1000)
         assert list(lobts.timestamps) == [1000, 2000]
 
-    def test_delta_slicing(self):
-        lobts = LOBts()
+    def test_eager_slicing(self):
+        lobts = LOBts(mode="eager")
         lobts.set_snapshot([(100.0, 10.0)], [(101.0, 8.0)], timestamp=1000)
         lobts.set_snapshot([(95.0, 15.0)], [(106.0, 12.0)], timestamp=2000)
         lobts.set_snapshot([(90.0, 20.0)], [(110.0, 15.0)], timestamp=3000)
@@ -620,8 +627,8 @@ class TestExistingDeltaModeUnaffected:
         assert sliced.len == 1
         assert sliced[2000] is not None
 
-    def test_delta_no_lazy_attributes(self):
-        lobts = LOBts()
+    def test_eager_no_lazy_attributes(self):
+        lobts = LOBts(mode="eager")
         assert not hasattr(lobts, "_delta_log")
         assert not hasattr(lobts, "_ckpt_ts")
         assert not hasattr(lobts, "_ckpts")
