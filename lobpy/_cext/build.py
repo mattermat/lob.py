@@ -1,10 +1,11 @@
-import cffi
 import os
+import sys
+
+import cffi
 
 ffibuilder = cffi.FFI()
 
-ffibuilder.cdef(
-    """
+ffibuilder.cdef("""
     /* ---- LobBook (opaque) ---- */
     typedef ... LobBook;
 
@@ -148,16 +149,18 @@ ffibuilder.cdef(
     void trades_append_bulk(Trades *tr,
                              const long long *ts, const uint8_t *sides,
                              const double *prices, const double *volumes, int n);
-"""
-)
+""")
 
 here = os.path.dirname(os.path.abspath(__file__))
+
+# libm is a separate library on Linux/macOS; on Windows it is part of the C runtime.
+_libraries = [] if sys.platform == "win32" else ["m"]
 
 ffibuilder.set_source(
     "lobpy._cext._core",
     '#include "_core.h"',
     include_dirs=[here],
-    libraries=["m"],
+    libraries=_libraries,
 )
 
 if __name__ == "__main__":

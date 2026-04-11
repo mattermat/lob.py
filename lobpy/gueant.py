@@ -413,25 +413,22 @@ def _compute_rolling_gueant_c(tl, side, window_size, buckets):
     n_lob = len(lob_ts)
     if n_lob == 0:
         side_name = "ask" if side == "a" else "bid"
-        return (pd.Series(name=f"gueant_A_{side_name}"),
-                pd.Series(name=f"gueant_k_{side_name}"))
+        return (pd.Series(name=f"gueant_A_{side_name}"), pd.Series(name=f"gueant_k_{side_name}"))
 
     # --- Trade arrays ---
     trades = tl.trades
     n_trades = len(trades)
     if n_trades > 0:
-        trade_ts_arr     = np.array([t.timestamp for t in trades], dtype=np.int64)
-        trade_prices_arr = np.array([t.price     for t in trades], dtype=np.float64)
+        trade_ts_arr = np.array([t.timestamp for t in trades], dtype=np.int64)
+        trade_prices_arr = np.array([t.price for t in trades], dtype=np.float64)
         # side encoding: 'b' = buy aggressor (hits ask) → 0; 's' = sell aggressor → 1
-        trade_sides_arr  = np.array(
-            [0 if t.side == "b" else 1 for t in trades], dtype=np.uint8
-        )
+        trade_sides_arr = np.array([0 if t.side == "b" else 1 for t in trades], dtype=np.uint8)
         max_trade_ts = int(trade_ts_arr[-1])
     else:
         trade_ts_arr = trade_prices_arr = trade_sides_arr = np.empty(0)
         trade_ts_arr = trade_ts_arr.view(np.int64)
         trade_prices_arr = trade_prices_arr.astype(np.float64)
-        trade_sides_arr  = trade_sides_arr.astype(np.uint8)
+        trade_sides_arr = trade_sides_arr.astype(np.uint8)
         max_trade_ts = int(lob_ts[-1])
 
     end_ts = max(int(lob_ts[-1]), max_trade_ts)
@@ -451,24 +448,26 @@ def _compute_rolling_gueant_c(tl, side, window_size, buckets):
         return ffi.cast(ct, arr.ctypes.data)
 
     lib.gueant_rolling_buckets(
-        _p(lob_ts,          "const long long *"), n_lob,
-        _p(bid_offs,        "const int *"),
-        _p(bid_data,        "const double *") if len(bid_data) > 0 else ffi.NULL,
-        _p(ask_offs,        "const int *"),
-        _p(ask_data,        "const double *") if len(ask_data) > 0 else ffi.NULL,
+        _p(lob_ts, "const long long *"),
+        n_lob,
+        _p(bid_offs, "const int *"),
+        _p(bid_data, "const double *") if len(bid_data) > 0 else ffi.NULL,
+        _p(ask_offs, "const int *"),
+        _p(ask_data, "const double *") if len(ask_data) > 0 else ffi.NULL,
         end_ts,
-        _p(trade_ts_arr,    "const long long *") if n_trades > 0 else ffi.NULL,
-        _p(trade_prices_arr,"const double *")    if n_trades > 0 else ffi.NULL,
-        _p(trade_sides_arr, "const uint8_t *")   if n_trades > 0 else ffi.NULL,
+        _p(trade_ts_arr, "const long long *") if n_trades > 0 else ffi.NULL,
+        _p(trade_prices_arr, "const double *") if n_trades > 0 else ffi.NULL,
+        _p(trade_sides_arr, "const uint8_t *") if n_trades > 0 else ffi.NULL,
         n_trades,
         float(tl.tick_size),
         gueant_side,
         int(window_size),
-        _p(thresholds_arr,  "const int *"),
+        _p(thresholds_arr, "const int *"),
         n_buckets,
-        _p(all_ts,          "const long long *"), n_all_ts,
-        _p(out_A,           "double *"),
-        _p(out_k,           "double *"),
+        _p(all_ts, "const long long *"),
+        n_all_ts,
+        _p(out_A, "double *"),
+        _p(out_k, "double *"),
     )
 
     side_name = "ask" if side == "a" else "bid"
