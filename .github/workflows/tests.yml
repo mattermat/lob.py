@@ -29,7 +29,9 @@ jobs:
         pip install -e ".[export]"
 
     - name: Build C extension
-      run: python lobpy/_cext/build.py
+      run: |
+        pip install cffi setuptools
+        python lobpy/_cext/build.py
 
     - name: Run tests with coverage
       run: pytest --cov=lobpy --cov-report=xml
