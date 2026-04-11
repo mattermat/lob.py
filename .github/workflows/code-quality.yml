@@ -43,6 +43,9 @@ jobs:
         pip install -r requirements-dev.txt
         pip install -e ".[export]"
 
+    - name: Build C extension
+      run: python lobpy/_cext/build.py
+
     - name: Run MyPy
       run: mypy lobpy
 
