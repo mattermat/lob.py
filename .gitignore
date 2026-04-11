@@ -6,6 +6,10 @@ __pycache__/
 # C extensions
 *.so
 
+# cffi-generated build artifacts
+lobpy/_cext/_core.c
+lobpy/_cext/_core.o
+
 # Distribution / packaging
 .Python
 build/

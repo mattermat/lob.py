@@ -5,6 +5,8 @@ TimeLine (TL) - combines LOBts with trade events.
 import numpy as np
 import pandas as pd
 
+from lobpy._cext import ffi, lib
+
 from .gueant import GueantAccessor
 from .lobts import LOBts
 from .ohlc import TS_UNITS as _TS_UNITS
@@ -61,9 +63,15 @@ class TL:
         self.lob_mode = lob_mode
         self.update_type = update_type
         self.timestamp_unit = timestamp_unit
-        _lobts_mode = "latest" if lob_mode == "snapshot" else "delta"
+        _lobts_mode = "latest" if lob_mode == "snapshot" else "lazy"
         self._lobts = LOBts(name=name, tick_size=tick_size, mode=_lobts_mode)
-        self._trades = []
+        self._ptr_trades = lib.trades_create()
+        self._trades_cache = None  # invalidated on mutation, rebuilt lazily
+
+    def __del__(self):
+        ptr = getattr(self, "_ptr_trades", None)
+        if ptr is not None and ptr != ffi.NULL:
+            lib.trades_destroy(ptr)
 
     # ------------------------------------------------------------------
     # LOB methods
@@ -107,7 +115,18 @@ class TL:
     @property
     def trades(self):
         """Return list of Trade objects in insertion order."""
-        return self._trades
+        if self._trades_cache is None:
+            n = lib.trades_len(self._ptr_trades)
+            ts_p = ffi.new("long long *")
+            side_p = ffi.new("int *")
+            price_p = ffi.new("double *")
+            vol_p = ffi.new("double *")
+            result = []
+            for i in range(n):
+                lib.trades_get_at(self._ptr_trades, i, ts_p, side_p, price_p, vol_p)
+                result.append(Trade(ts_p[0], chr(side_p[0]), price_p[0], vol_p[0]))
+            self._trades_cache = result
+        return self._trades_cache
 
     def add_trade(self, timestamp, side, price, volume):
         """
@@ -120,7 +139,8 @@ class TL:
             price: Execution price
             volume: Trade size
         """
-        self._trades.append(Trade(timestamp, side, price, volume))
+        lib.trades_append(self._ptr_trades, timestamp, ord(side), price, volume)
+        self._trades_cache = None
 
     def add_trades(self, timestamp, trades):
         """
@@ -131,7 +151,8 @@ class TL:
             trades: List of (side, price, volume) tuples
         """
         for side, price, volume in trades:
-            self._trades.append(Trade(timestamp, side, price, volume))
+            lib.trades_append(self._ptr_trades, timestamp, ord(side), price, volume)
+        self._trades_cache = None
 
     # ------------------------------------------------------------------
     # Misc
@@ -148,7 +169,7 @@ class TL:
                 lob_rows.append((ts, "lob", "a", level, price, size))
 
         trade_rows = [
-            (t.timestamp, "trade", t.side, float("nan"), t.price, t.volume) for t in self._trades
+            (t.timestamp, "trade", t.side, float("nan"), t.price, t.volume) for t in self.trades
         ]
 
         return sorted(lob_rows + trade_rows, key=lambda r: r[0])
@@ -200,21 +221,19 @@ class TL:
             timestamp_unit=self.timestamp_unit,
         )
         result._lobts = self._lobts.get_range(start, stop)
-        result._trades = [
-            t
-            for t in self._trades
-            if (start is None or t.timestamp >= start) and (stop is None or t.timestamp <= stop)
-        ]
+        for t in self.trades:
+            if (start is None or t.timestamp >= start) and (stop is None or t.timestamp <= stop):
+                lib.trades_append(result._ptr_trades, t.timestamp, ord(t.side), t.price, t.volume)
         return result
 
     def __len__(self):
         """Return total number of events (LOB snapshots + trades)."""
-        return len(self._lobts) + len(self._trades)
+        return len(self._lobts) + lib.trades_len(self._ptr_trades)
 
     @property
     def timestamps(self):
         """Return sorted list of all event timestamps (LOB and trades)."""
-        ts = sorted(set(self._lobts.timestamps) | {t.timestamp for t in self._trades})
+        ts = sorted(set(self._lobts.timestamps) | {t.timestamp for t in self.trades})
         return ts
 
     def rolling(self, window_size):
@@ -241,7 +260,7 @@ class TL:
 
         O(N_trades) amortised — does not touch LOB data at all.
         """
-        trades = sorted(self._trades, key=lambda t: t.timestamp)
+        trades = sorted(self.trades, key=lambda t: t.timestamp)
         left = 0
         for right in range(len(trades)):
             ts = trades[right].timestamp
@@ -263,7 +282,7 @@ class TL:
             pd.DataFrame indexed by candle-open timestamp with columns:
             open, high, low, close, volume, count.
         """
-        return _ohlc_compute(self._trades, period, self.timestamp_unit)
+        return _ohlc_compute(self.trades, period, self.timestamp_unit)
 
     def realized_vol(self, window_size=None):
         """
@@ -283,7 +302,7 @@ class TL:
         """
 
         return _realized_vol_compute(
-            self._trades,
+            self.trades,
             window_size=window_size,
             rolling_items=self._rolling_trades_iter,
         )
@@ -307,7 +326,7 @@ class TL:
                 buy_volume  – volume from buy-aggressor trades
                 sell_volume – volume from sell-aggressor trades
         """
-        return _volume_buckets_compute(self._trades, bucket_size, include_partial)
+        return _volume_buckets_compute(self.trades, bucket_size, include_partial)
 
     def vpin(self, window_size=None, bucket_size=None):
         """
@@ -330,7 +349,7 @@ class TL:
         """
 
         return _vpin_compute(
-            self._trades,
+            self.trades,
             window_size=window_size,
             bucket_size=bucket_size,
             rolling_items=self._rolling_trades_iter,
@@ -341,7 +360,7 @@ class TL:
         """Accessor for Guéant intensity function parameters (λ(δ) = A·exp(-k·δ))."""
         return GueantAccessor(self)
 
-    def from_parquet(self, path, mode="eager"):
+    def from_parquet(self, path, mode="lazy"):
         """
         Load LOB and trade events from a parquet file into this TL instance.
 
@@ -364,17 +383,16 @@ class TL:
 
         Args:
             path: Path to the parquet file.
-            mode: 'eager' (default) loads everything into memory immediately.
-                  'lazy' stores only checkpoints + a delta log and reconstructs
-                  LOB snapshots on demand — dramatically lower memory usage for
-                  large files.
+            mode: 'lazy' (default) stores only checkpoints + a delta log and reconstructs
+                  LOB snapshots on demand — dramatically lower memory usage for large files.
+                  'eager' loads everything into memory immediately.
         """
-        if mode == "eager":
-            self._from_parquet_eager(path)
-        elif mode == "lazy":
+        if mode == "lazy":
             self._from_parquet_lazy(path)
+        elif mode == "eager":
+            self._from_parquet_eager(path)
         else:
-            raise ValueError(f"Unknown mode '{mode}'. Accepted: 'eager', 'lazy'")
+            raise ValueError(f"Unknown mode '{mode}'. Accepted: 'lazy', 'eager'")
 
     def _from_parquet_eager(self, path):
         df = pd.read_parquet(path).sort_values("timestamp")
@@ -432,18 +450,23 @@ class TL:
         else:
             delta_log = np.empty(0, dtype=_LAZY_DELTA_DTYPE)
 
-        # --- trades (numeric columns via numpy, side via vectorised comparison) ---
+        # --- trades: bulk-load into C array without boxing Python objects ---
+        lib.trades_clear(self._ptr_trades)
         if len(tr_table) > 0:
-            tr_ts = tr_table.column("timestamp").to_numpy()
+            tr_ts = tr_table.column("timestamp").to_numpy().astype(np.int64)
             tr_buy = pc.equal(tr_table.column("side"), "buy").to_numpy()
-            tr_price = tr_table.column("price").to_numpy()
-            tr_qty = tr_table.column("quantity").to_numpy()
-            trade_rows = [
-                Trade(int(ts), "b" if buy else "s", float(p), float(q))
-                for ts, buy, p, q in zip(tr_ts, tr_buy, tr_price, tr_qty)
-            ]
-        else:
-            trade_rows = []
+            tr_price = tr_table.column("price").to_numpy().astype(np.float64)
+            tr_qty = tr_table.column("quantity").to_numpy().astype(np.float64)
+            tr_sides = np.where(tr_buy, np.uint8(ord("b")), np.uint8(ord("s"))).astype(np.uint8)
+            lib.trades_append_bulk(
+                self._ptr_trades,
+                ffi.cast("long long *", tr_ts.ctypes.data),
+                ffi.cast("uint8_t *", tr_sides.ctypes.data),
+                ffi.cast("double *", tr_price.ctypes.data),
+                ffi.cast("double *", tr_qty.ctypes.data),
+                len(tr_ts),
+            )
+        self._trades_cache = None
 
         # --- book_level → checkpoints ---
         # Group by timestamp using numpy (table is already timestamp-sorted so
@@ -477,7 +500,9 @@ class TL:
             lazy_lobts.build_checkpoints()
 
         self._lobts = lazy_lobts
-        self._trades = trade_rows
 
     def __repr__(self):
-        return f"<TL[{self.name}] lob_snapshots={len(self._lobts)}" f" trades={len(self._trades)}>"
+        return (
+            f"<TL[{self.name}] lob_snapshots={len(self._lobts)}"
+            f" trades={lib.trades_len(self._ptr_trades)}>"
+        )

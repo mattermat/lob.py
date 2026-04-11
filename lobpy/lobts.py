@@ -6,8 +6,9 @@ from collections import OrderedDict
 
 import numpy as np
 
-from .lob import LOB, _make_ask_array, _make_bid_array
-from .sorteddict import SortedDict
+from lobpy._cext import ffi, lib
+
+from .lob import LOB, _get_sidebook_data, _levels_to_arrays, _make_ask_array, _make_bid_array
 
 _LAZY_DELTA_DTYPE: np.dtype = np.dtype(
     [("ts", "i8"), ("side", "u1"), ("price", "f8"), ("qty", "f8")]
@@ -19,24 +20,29 @@ _AUTO_CHECKPOINTS = 100
 class LOBts:
     """Time series of LOB objects indexed by timestamp."""
 
-    def __init__(self, name=None, tick_size=1, mode="delta") -> None:
+    def __init__(self, name=None, tick_size=1, mode="lazy") -> None:
         """
         Initialize LOBts.
 
         Args:
             name: Optional identifier for the time series
             tick_size: Minimum price increment
-            mode: 'delta' to store all snapshots eagerly,
-                  'latest' to keep only the current snapshot,
-                  'lazy' to store only checkpoints + a delta log and reconstruct on demand
+            mode: 'lazy' (default) stores only checkpoints + delta log and reconstructs on demand,
+                  'eager' stores all snapshots as full LobBook objects in C memory,
+                  'latest' keeps only the most recent snapshot in C memory
         """
         if name is None:
             name = f"lobts{id(self)}"
         self.name = name
         self.tick_size = tick_size
+        if mode not in ("lazy", "eager", "latest"):
+            raise ValueError(
+                f"Unknown mode '{mode}'. Accepted: 'lazy' (default), 'eager', 'latest'."
+            )
         self._mode = mode
 
         if mode == "lazy":
+            self._ptr = None
             self._delta_log = np.empty(0, dtype=_LAZY_DELTA_DTYPE)
             self._ckpt_ts: np.ndarray = np.empty(0, dtype=np.int64)
             self._ckpts: dict[int, tuple[np.ndarray, np.ndarray]] = {}
@@ -44,8 +50,12 @@ class LOBts:
             self._ts_lo = None  # inclusive lower bound for timestamps view
             self._ts_hi = None  # inclusive upper bound for timestamps view
         else:
-            self._lobs = SortedDict()
-            self._timestamps = self._lobs.keys()
+            mode_int = 0 if mode == "eager" else 1  # LOBTS_DELTA=0, LOBTS_LATEST=1
+            self._ptr = lib.lobts_create(name.encode(), float(tick_size), mode_int)
+
+    def __del__(self):
+        if hasattr(self, "_ptr") and self._ptr is not None:
+            lib.lobts_destroy(self._ptr)
 
     # ------------------------------------------------------------------
     # Core properties
@@ -68,7 +78,14 @@ class LOBts:
             if self._ts_hi is not None:
                 ts_set = {ts for ts in ts_set if ts <= self._ts_hi}
             return sorted(ts_set)
-        return self._timestamps
+        ts_pp = ffi.new("const long long **")
+        len_p = ffi.new("int *")
+        lib.lobts_get_timestamps(self._ptr, ts_pp, len_p)
+        n = len_p[0]
+        if n == 0:
+            return []
+        buf = ffi.buffer(ffi.cast("long long *", ts_pp[0]), n * 8)
+        return np.frombuffer(buf, dtype=np.int64).copy().tolist()
 
     # ------------------------------------------------------------------
     # Mutation
@@ -85,25 +102,27 @@ class LOBts:
             force: If True and timestamp exists, replace it
         """
         if self._mode == "lazy":
-            if timestamp in self._ckpts and not force:
-                raise ValueError(
-                    f"Timestamp {timestamp} already exists. Use force=True to overwrite."
-                )
-            self._ckpts[timestamp] = (_make_bid_array(bids), _make_ask_array(asks))
-            if timestamp not in self._ckpt_ts:
-                self._ckpt_ts = np.sort(np.append(self._ckpt_ts, np.int64(timestamp)))
-            self._cache.pop(timestamp, None)
+            ts = int(timestamp)
+            if ts in self._ckpts and not force:
+                raise ValueError(f"Timestamp {ts} already exists. Use force=True to overwrite.")
+            self._ckpts[ts] = (_make_bid_array(bids), _make_ask_array(asks))
+            if ts not in self._ckpt_ts:
+                self._ckpt_ts = np.sort(np.append(self._ckpt_ts, np.int64(ts)))
+            self._cache.pop(ts, None)
             return
 
-        if self._mode == "latest":
-            self._lobs.clear()
-
-        lob = LOB(name=f"{self.name}_t{timestamp}", tick_size=self.tick_size, bids=bids, asks=asks)
-        lob.timestamp = timestamp
-
-        if timestamp in self._lobs and not force:
+        b_prices, b_qtys = _levels_to_arrays(bids)
+        a_prices, a_qtys = _levels_to_arrays(asks)
+        bn, an = len(b_prices), len(a_prices)
+        bp = ffi.cast("double *", b_prices.ctypes.data) if bn else ffi.NULL
+        bq = ffi.cast("double *", b_qtys.ctypes.data) if bn else ffi.NULL
+        ap = ffi.cast("double *", a_prices.ctypes.data) if an else ffi.NULL
+        aq = ffi.cast("double *", a_qtys.ctypes.data) if an else ffi.NULL
+        ret = lib.lobts_set_snapshot(
+            self._ptr, int(timestamp), bp, bq, bn, ap, aq, an, 1 if force else 0
+        )
+        if ret < 0:
             raise ValueError(f"Timestamp {timestamp} already exists. Use force=True to overwrite.")
-        self._lobs[timestamp] = lob
 
     def set_updates(self, updates, timestamp=0):
         """
@@ -122,45 +141,35 @@ class LOBts:
         if self._mode == "lazy":
             if not updates:
                 return None
+            ts = int(timestamp)
             rows = []
             for side, price, size in updates:
                 side_int = np.uint8(0) if side in ("b", "bid") else np.uint8(1)
-                rows.append((np.int64(timestamp), side_int, np.float64(price), np.float64(size)))
+                rows.append((np.int64(ts), side_int, np.float64(price), np.float64(size)))
             new_rows = np.array(rows, dtype=_LAZY_DELTA_DTYPE)
             self._delta_log = np.concatenate([self._delta_log, new_rows])
-            self._cache.pop(timestamp, None)
+            self._cache.pop(ts, None)
             return None
 
-        if len(self._lobs) > 0:
-            prev_timestamp = self._lobs.keys()[-1]
-            prev_lob = self._lobs[prev_timestamp]
-            new_lob = LOB(name=f"{self.name}_t{timestamp}", tick_size=self.tick_size)
-
-            new_lob._bids = prev_lob._bids.copy()
-            new_lob._asks = prev_lob._asks.copy()
-            new_lob.timestamp = prev_timestamp
-
-            for side, price, size in updates:
-                if side == "b":
-                    side = "bid"
-                elif side == "a":
-                    side = "ask"
-                new_lob.update(side, price, size, 0)
-
-            new_lob.timestamp = timestamp
-            self._lobs[timestamp] = new_lob
-        else:
-            lob = LOB(name=f"{self.name}_t{timestamp}", tick_size=self.tick_size)
-            for side, price, size in updates:
-                if side == "b":
-                    side = "bid"
-                elif side == "a":
-                    side = "ask"
-                lob.update(side, price, size, 0)
-            lob.timestamp = timestamp
-            self._lobs[timestamp] = lob
-
-        return self._lobs[timestamp]
+        if not updates:
+            return None
+        n = len(updates)
+        sides = np.empty(n, dtype=np.uint8)
+        prices = np.empty(n, dtype=np.float64)
+        qtys = np.empty(n, dtype=np.float64)
+        for i, (side, price, size) in enumerate(updates):
+            sides[i] = 0 if side in ("b", "bid") else 1
+            prices[i] = float(price)
+            qtys[i] = float(size)
+        lib.lobts_set_updates(
+            self._ptr,
+            int(timestamp),
+            ffi.cast("uint8_t *", sides.ctypes.data),
+            ffi.cast("double *", prices.ctypes.data),
+            ffi.cast("double *", qtys.ctypes.data),
+            n,
+        )
+        return self[int(timestamp)]
 
     def update(self, side, price_level, size, timestamp=0):
         """
@@ -201,12 +210,15 @@ class LOBts:
         t = timestamp_or_slice
 
         if self._mode == "lazy":
+            t = int(t)
+            if t not in self:
+                return None
             return self._reconstruct(t)
 
-        try:
-            return self._lobs[t]
-        except KeyError:
+        lob_ptr = lib.lobts_get(self._ptr, int(t))
+        if lob_ptr == ffi.NULL:
             return None
+        return LOB._from_ptr(lob_ptr)
 
     def _reconstruct(self, t):
         """Reconstruct LOB at timestamp t from nearest checkpoint + delta replay."""
@@ -214,19 +226,30 @@ class LOBts:
             self._cache.move_to_end(t)
             return self._cache[t]
 
+        # Find the nearest checkpoint at or before t.
+        # If none exists, start from an empty book (matching eager-mode behaviour when
+        # set_updates is called before any set_snapshot).
         if len(self._ckpt_ts) == 0:
-            return None
+            t0 = None
+            bids_arr = np.empty((0, 2), dtype=np.float64)
+            asks_arr = np.empty((0, 2), dtype=np.float64)
+        else:
+            idx = int(np.searchsorted(self._ckpt_ts, t, side="right")) - 1
+            if idx < 0:
+                t0 = None
+                bids_arr = np.empty((0, 2), dtype=np.float64)
+                asks_arr = np.empty((0, 2), dtype=np.float64)
+            else:
+                t0 = int(self._ckpt_ts[idx])
+                bids_arr, asks_arr = self._ckpts[t0]
 
-        idx = int(np.searchsorted(self._ckpt_ts, t, side="right")) - 1
-        if idx < 0:
-            return None
-
-        t0 = int(self._ckpt_ts[idx])
-        bids_arr, asks_arr = self._ckpts[t0]
-
-        # Slice delta log from t0 to t (both inclusive)
+        # Slice delta log from t0 (or the beginning if no checkpoint) to t (both inclusive)
         if len(self._delta_log) > 0:
-            lo = int(np.searchsorted(self._delta_log["ts"], t0, side="left"))
+            lo = (
+                int(np.searchsorted(self._delta_log["ts"], t0, side="left"))
+                if t0 is not None
+                else 0
+            )
             hi = int(np.searchsorted(self._delta_log["ts"], t, side="right"))
             deltas = self._delta_log[lo:hi]
         else:
@@ -327,13 +350,20 @@ class LOBts:
 
             return result
 
-        result = LOBts(name=f"{self.name}_range", tick_size=self.tick_size, mode=self._mode)
-        for ts in self._lobs.keys():
-            if start_ts is not None and ts < start_ts:
-                continue
-            if end_ts is not None and ts > end_ts:
-                continue
-            result._lobs[ts] = self._lobs[ts]
+        has_start = 1 if start_ts is not None else 0
+        has_end = 1 if end_ts is not None else 0
+        new_ptr = lib.lobts_get_range(
+            self._ptr,
+            int(start_ts) if start_ts is not None else 0,
+            int(end_ts) if end_ts is not None else 0,
+            has_start,
+            has_end,
+        )
+        result = LOBts.__new__(LOBts)
+        result.name = f"{self.name}_range"
+        result.tick_size = self.tick_size
+        result._mode = self._mode
+        result._ptr = new_ptr
         return result
 
     # ------------------------------------------------------------------
@@ -344,7 +374,7 @@ class LOBts:
         """Return number of LOB timestamps stored."""
         if self._mode == "lazy":
             return len(self.timestamps)
-        return len(self._lobs)
+        return lib.lobts_len(self._ptr)
 
     @property
     def len(self):
@@ -362,13 +392,14 @@ class LOBts:
     def __contains__(self, timestamp):
         """Check if timestamp exists in the series."""
         if self._mode == "lazy":
-            if timestamp in self._ckpts:
+            ts = int(timestamp)
+            if ts in self._ckpts:
                 return True
             if len(self._delta_log) == 0:
                 return False
-            idx = int(np.searchsorted(self._delta_log["ts"], timestamp))
-            return idx < len(self._delta_log) and self._delta_log["ts"][idx] == timestamp
-        return timestamp in self._lobs
+            idx = int(np.searchsorted(self._delta_log["ts"], ts))
+            return idx < len(self._delta_log) and self._delta_log["ts"][idx] == ts
+        return lib.lobts_get(self._ptr, int(timestamp)) != ffi.NULL
 
     def __iter__(self):
         """Iterate over LOB objects in timestamp order."""
@@ -376,7 +407,8 @@ class LOBts:
             for ts in self.timestamps:
                 yield self[ts]
             return
-        return iter(self._lobs.values())
+        for i in range(lib.lobts_len(self._ptr)):
+            yield LOB._from_ptr(lib.lobts_get_at(self._ptr, i))
 
     # ------------------------------------------------------------------
     # Time series analytics — mode-agnostic via self.timestamps / self[ts]
@@ -384,10 +416,11 @@ class LOBts:
 
     def _seq_extract_best(self, start_ts=None, end_ts=None):
         """
-        Single forward pass through checkpoints + deltas.
+        Single forward pass through checkpoints + deltas via C extension.
 
         Returns (timestamps, best_bids, best_asks, best_bidqs, best_askqs).
         Only valid in lazy mode; O(N + D) vs the naive O(N * D/C).
+        timestamps is a Python list; the four price/qty outputs are numpy float64 arrays.
         """
         all_ts = self.timestamps  # sorted
         if start_ts is not None:
@@ -397,26 +430,19 @@ class LOBts:
         if not all_ts:
             return [], [], [], [], []
 
+        n_ts = len(all_ts)
+        all_ts_arr = np.asarray(all_ts, dtype=np.int64)
         first_ts = all_ts[0]
         last_ts = all_ts[-1]
 
         # Anchor: nearest checkpoint at or before first_ts
-        if len(self._ckpt_ts) > 0:
-            anchor_idx = int(np.searchsorted(self._ckpt_ts, first_ts, side="right")) - 1
-        else:
-            anchor_idx = -1
+        n_ckpts = len(self._ckpt_ts)
+        anchor_idx = (
+            int(np.searchsorted(self._ckpt_ts, first_ts, side="right")) - 1 if n_ckpts > 0 else -1
+        )
+        anchor_ts = int(self._ckpt_ts[anchor_idx]) if anchor_idx >= 0 else None
 
-        if anchor_idx >= 0:
-            anchor_ts = int(self._ckpt_ts[anchor_idx])
-            bids_arr, asks_arr = self._ckpts[anchor_ts]
-            bid_dict = {float(p): float(q) for p, q in bids_arr}
-            ask_dict = {float(p): float(q) for p, q in asks_arr}
-        else:
-            anchor_ts = None
-            bid_dict = {}
-            ask_dict = {}
-
-        # Slice the delta log to the relevant window
+        # Slice delta log to [anchor_ts_or_first_ts, last_ts]
         if len(self._delta_log) > 0:
             lo = int(
                 np.searchsorted(
@@ -429,101 +455,98 @@ class LOBts:
             deltas = self._delta_log[lo:hi]
         else:
             deltas = self._delta_log
-
-        ckpt_set = set(int(t) for t in self._ckpt_ts)
-
-        # Batch-compute the delta_idx for every checkpoint that falls within the range.
-        # Replaces per-checkpoint searchsorted calls inside the main loop.
         n_deltas = len(deltas)
-        ckpt_delta_pos: dict = {}
+
+        # Flatten all checkpoints into contiguous arrays + offset tables.
+        # bid_offs / ask_offs have length n_ckpts+1 (CSR-style);
+        # ckpt_bids_flat / ckpt_asks_flat are interleaved [price, qty, ...].
+        if n_ckpts > 0:
+            bid_offs = np.empty(n_ckpts + 1, dtype=np.int32)
+            ask_offs = np.empty(n_ckpts + 1, dtype=np.int32)
+            bid_offs[0] = ask_offs[0] = 0
+            for k, cts in enumerate(self._ckpt_ts):
+                bids_a, asks_a = self._ckpts[int(cts)]
+                bid_offs[k + 1] = bid_offs[k] + len(bids_a)
+                ask_offs[k + 1] = ask_offs[k] + len(asks_a)
+            total_bid = int(bid_offs[n_ckpts])
+            total_ask = int(ask_offs[n_ckpts])
+            ckpt_bids_flat = np.empty(total_bid * 2, dtype=np.float64)
+            ckpt_asks_flat = np.empty(total_ask * 2, dtype=np.float64)
+            for k, cts in enumerate(self._ckpt_ts):
+                bids_a, asks_a = self._ckpts[int(cts)]
+                b0 = int(bid_offs[k]) * 2
+                b1 = int(bid_offs[k + 1]) * 2
+                if b1 > b0:
+                    ckpt_bids_flat[b0:b1] = bids_a.ravel()
+                a0 = int(ask_offs[k]) * 2
+                a1 = int(ask_offs[k + 1]) * 2
+                if a1 > a0:
+                    ckpt_asks_flat[a0:a1] = asks_a.ravel()
+
+        # Extract contiguous field arrays from the structured delta log.
+        # Structured-array field views are strided (stride = record size), so
+        # np.ascontiguousarray is required before passing raw pointers to C.
         if n_deltas > 0:
-            dl_ts = deltas["ts"]
-            dl_side = deltas["side"]
-            dl_price = deltas["price"]
-            dl_qty = deltas["qty"]
-            ckpts_in_range = [
-                ts for ts in ckpt_set if ts != anchor_ts and first_ts <= ts <= last_ts
-            ]
-            if ckpts_in_range:
-                positions = np.searchsorted(dl_ts, ckpts_in_range, side="left")
-                ckpt_delta_pos = dict(zip(ckpts_in_range, positions.tolist()))
-        else:
-            dl_ts = dl_side = dl_price = dl_qty = None
+            dl_ts = np.ascontiguousarray(deltas["ts"])
+            dl_side = np.ascontiguousarray(deltas["side"])
+            dl_price = np.ascontiguousarray(deltas["price"])
+            dl_qty = np.ascontiguousarray(deltas["qty"])
 
-        nan = float("nan")
+        # Pre-allocate output arrays; C fills them in one pass.
+        out_bids = np.empty(n_ts, dtype=np.float64)
+        out_asks = np.empty(n_ts, dtype=np.float64)
+        out_bidqs = np.empty(n_ts, dtype=np.float64)
+        out_askqs = np.empty(n_ts, dtype=np.float64)
 
-        # Initialise running best bid/ask from the anchor state
-        best_bid = max(bid_dict) if bid_dict else nan
-        best_ask = min(ask_dict) if ask_dict else nan
+        def _p(arr, ct):
+            return ffi.cast(ct, arr.ctypes.data)
 
-        delta_idx = 0
-        out_ts: list = []
-        out_bids: list = []
-        out_asks: list = []
-        out_bidqs: list = []
-        out_askqs: list = []
+        lib.lobts_seq_extract_best(
+            _p(all_ts_arr, "const long long *"),
+            n_ts,
+            _p(self._ckpt_ts, "const long long *") if n_ckpts > 0 else ffi.NULL,
+            n_ckpts,
+            _p(bid_offs, "const int *") if n_ckpts > 0 else ffi.NULL,
+            _p(ckpt_bids_flat, "const double *") if n_ckpts > 0 and total_bid > 0 else ffi.NULL,
+            _p(ask_offs, "const int *") if n_ckpts > 0 else ffi.NULL,
+            _p(ckpt_asks_flat, "const double *") if n_ckpts > 0 and total_ask > 0 else ffi.NULL,
+            _p(dl_ts, "const long long *") if n_deltas > 0 else ffi.NULL,
+            _p(dl_side, "const uint8_t *") if n_deltas > 0 else ffi.NULL,
+            _p(dl_price, "const double *") if n_deltas > 0 else ffi.NULL,
+            _p(dl_qty, "const double *") if n_deltas > 0 else ffi.NULL,
+            n_deltas,
+            anchor_idx,
+            _p(out_bids, "double *"),
+            _p(out_asks, "double *"),
+            _p(out_bidqs, "double *"),
+            _p(out_askqs, "double *"),
+        )
 
-        for t in all_ts:
-            if t in ckpt_set and t != anchor_ts:
-                # New full checkpoint — reset state
-                bids_arr, asks_arr = self._ckpts[t]
-                bid_dict = {float(p): float(q) for p, q in bids_arr}
-                ask_dict = {float(p): float(q) for p, q in asks_arr}
-                delta_idx = ckpt_delta_pos.get(t, 0)
-                best_bid = max(bid_dict) if bid_dict else nan
-                best_ask = min(ask_dict) if ask_dict else nan
-
-            # Apply all deltas at timestamp t; n_deltas cached to avoid len() per iteration
-            while delta_idx < n_deltas and dl_ts[delta_idx] == t:
-                price = float(dl_price[delta_idx])
-                qty = float(dl_qty[delta_idx])
-                if int(dl_side[delta_idx]) == 0:  # bid
-                    if qty == 0.0:
-                        bid_dict.pop(price, None)
-                        if price == best_bid:
-                            best_bid = max(bid_dict) if bid_dict else nan
-                    else:
-                        bid_dict[price] = qty
-                        if best_bid != best_bid or price > best_bid:  # nan or new max
-                            best_bid = price
-                else:  # ask
-                    if qty == 0.0:
-                        ask_dict.pop(price, None)
-                        if price == best_ask:
-                            best_ask = min(ask_dict) if ask_dict else nan
-                    else:
-                        ask_dict[price] = qty
-                        if best_ask != best_ask or price < best_ask:  # nan or new min
-                            best_ask = price
-                delta_idx += 1
-
-            out_ts.append(t)
-            out_bids.append(best_bid)
-            out_asks.append(best_ask)
-            out_bidqs.append(bid_dict.get(best_bid, nan))
-            out_askqs.append(ask_dict.get(best_ask, nan))
-
-        return out_ts, out_bids, out_asks, out_bidqs, out_askqs
+        return all_ts, out_bids, out_asks, out_bidqs, out_askqs
 
     def _iter_seq_states(self, start_ts=None, end_ts=None):
         """
         Yield (ts, bid_dict, ask_dict) for every LOB timestamp via a single forward pass.
 
         bid_dict / ask_dict are plain {price: qty} dicts (copies, safe to read after yield).
-        In lazy mode this is O(N + D); in other modes it iterates the stored LOB objects.
+        In lazy mode this uses the C extension; in other modes it iterates stored LOB objects.
         """
         if self._mode != "lazy":
-            for ts, lob in self._lobs.items():
+            for i in range(lib.lobts_len(self._ptr)):
+                ts = lib.lobts_ts_at(self._ptr, i)
                 if start_ts is not None and ts < start_ts:
                     continue
                 if end_ts is not None and ts > end_ts:
                     break
-                bids = {float(p): float(q) for p, q in lob._bids}
-                asks = {float(p): float(q) for p, q in lob._asks}
-                yield ts, bids, asks
+                lob_ptr = lib.lobts_get_at(self._ptr, i)
+                bids_arr = _get_sidebook_data(lob_ptr, lib.lob_get_bids)
+                asks_arr = _get_sidebook_data(lob_ptr, lib.lob_get_asks)
+                yield int(ts), {float(p): float(q) for p, q in bids_arr}, {
+                    float(p): float(q) for p, q in asks_arr
+                }
             return
 
-        # Lazy mode: same forward-pass structure as _seq_extract_best
+        # Lazy mode — delegate the forward pass to C.
         all_ts = self.timestamps
         if start_ts is not None:
             all_ts = [t for t in all_ts if t >= start_ts]
@@ -532,23 +555,16 @@ class LOBts:
         if not all_ts:
             return
 
+        n_ts = len(all_ts)
+        all_ts_arr = np.asarray(all_ts, dtype=np.int64)
         first_ts = all_ts[0]
         last_ts = all_ts[-1]
 
-        if len(self._ckpt_ts) > 0:
-            anchor_idx = int(np.searchsorted(self._ckpt_ts, first_ts, side="right")) - 1
-        else:
-            anchor_idx = -1
-
-        if anchor_idx >= 0:
-            anchor_ts = int(self._ckpt_ts[anchor_idx])
-            bids_arr, asks_arr = self._ckpts[anchor_ts]
-            bid_dict: dict = {float(p): float(q) for p, q in bids_arr}
-            ask_dict: dict = {float(p): float(q) for p, q in asks_arr}
-        else:
-            anchor_ts = None
-            bid_dict = {}
-            ask_dict = {}
+        n_ckpts = len(self._ckpt_ts)
+        anchor_idx = (
+            int(np.searchsorted(self._ckpt_ts, first_ts, side="right")) - 1 if n_ckpts > 0 else -1
+        )
+        anchor_ts = int(self._ckpt_ts[anchor_idx]) if anchor_idx >= 0 else None
 
         if len(self._delta_log) > 0:
             lo = int(
@@ -562,36 +578,260 @@ class LOBts:
             deltas = self._delta_log[lo:hi]
         else:
             deltas = self._delta_log
+        n_deltas = len(deltas)
 
-        ckpt_set = set(int(t) for t in self._ckpt_ts)
-        delta_idx = 0
+        # Flatten checkpoint arrays (same logic as _seq_extract_best)
+        if n_ckpts > 0:
+            bid_offs = np.empty(n_ckpts + 1, dtype=np.int32)
+            ask_offs = np.empty(n_ckpts + 1, dtype=np.int32)
+            bid_offs[0] = ask_offs[0] = 0
+            for k, cts in enumerate(self._ckpt_ts):
+                bids_a, asks_a = self._ckpts[int(cts)]
+                bid_offs[k + 1] = bid_offs[k] + len(bids_a)
+                ask_offs[k + 1] = ask_offs[k] + len(asks_a)
+            total_bid_ckpt = int(bid_offs[n_ckpts])
+            total_ask_ckpt = int(ask_offs[n_ckpts])
+            ckpt_bids_flat = np.empty(total_bid_ckpt * 2, dtype=np.float64)
+            ckpt_asks_flat = np.empty(total_ask_ckpt * 2, dtype=np.float64)
+            for k, cts in enumerate(self._ckpt_ts):
+                bids_a, asks_a = self._ckpts[int(cts)]
+                b0 = int(bid_offs[k]) * 2
+                b1 = int(bid_offs[k + 1]) * 2
+                if b1 > b0:
+                    ckpt_bids_flat[b0:b1] = bids_a.ravel()
+                a0 = int(ask_offs[k]) * 2
+                a1 = int(ask_offs[k + 1]) * 2
+                if a1 > a0:
+                    ckpt_asks_flat[a0:a1] = asks_a.ravel()
 
-        for t in all_ts:
-            if t in ckpt_set and t != anchor_ts:
-                bids_arr, asks_arr = self._ckpts[t]
-                bid_dict = {float(p): float(q) for p, q in bids_arr}
-                ask_dict = {float(p): float(q) for p, q in asks_arr}
-                delta_idx = (
-                    int(np.searchsorted(deltas["ts"], t, side="left")) if len(deltas) > 0 else 0
+        if n_deltas > 0:
+            dl_ts = np.ascontiguousarray(deltas["ts"])
+            dl_side = np.ascontiguousarray(deltas["side"])
+            dl_price = np.ascontiguousarray(deltas["price"])
+            dl_qty = np.ascontiguousarray(deltas["qty"])
+
+        def _p(arr, ct):
+            return ffi.cast(ct, arr.ctypes.data)
+
+        # Shared CFFI args (used by both passes)
+        c_all_ts = _p(all_ts_arr, "const long long *")
+        c_ckpt_ts = _p(self._ckpt_ts, "const long long *") if n_ckpts > 0 else ffi.NULL
+        c_bid_offs = _p(bid_offs, "const int *") if n_ckpts > 0 else ffi.NULL
+        c_ckbids = (
+            _p(ckpt_bids_flat, "const double *") if n_ckpts > 0 and total_bid_ckpt > 0 else ffi.NULL
+        )
+        c_ask_offs = _p(ask_offs, "const int *") if n_ckpts > 0 else ffi.NULL
+        c_ckasks = (
+            _p(ckpt_asks_flat, "const double *") if n_ckpts > 0 and total_ask_ckpt > 0 else ffi.NULL
+        )
+        c_dl_ts = _p(dl_ts, "const long long *") if n_deltas > 0 else ffi.NULL
+        c_dl_side = _p(dl_side, "const uint8_t *") if n_deltas > 0 else ffi.NULL
+        c_dl_price = _p(dl_price, "const double *") if n_deltas > 0 else ffi.NULL
+        c_dl_qty = _p(dl_qty, "const double *") if n_deltas > 0 else ffi.NULL
+
+        out_ts_arr = np.empty(n_ts, dtype=np.int64)
+        out_bid_offs = np.empty(n_ts + 1, dtype=np.int32)
+        out_ask_offs = np.empty(n_ts + 1, dtype=np.int32)
+        total_bid_p = ffi.new("int *")
+        total_ask_p = ffi.new("int *")
+
+        def _call(bid_data_ptr, ask_data_ptr):
+            lib.lobts_iter_seq_states(
+                c_all_ts,
+                n_ts,
+                c_ckpt_ts,
+                n_ckpts,
+                c_bid_offs,
+                c_ckbids,
+                c_ask_offs,
+                c_ckasks,
+                c_dl_ts,
+                c_dl_side,
+                c_dl_price,
+                c_dl_qty,
+                n_deltas,
+                anchor_idx,
+                _p(out_ts_arr, "long long *"),
+                _p(out_bid_offs, "int *"),
+                _p(out_ask_offs, "int *"),
+                bid_data_ptr,
+                ask_data_ptr,
+                total_bid_p,
+                total_ask_p,
+            )
+
+        # Pass 1: count only — fills offset tables and totals, data pointers are NULL
+        _call(ffi.NULL, ffi.NULL)
+        total_bid = total_bid_p[0]
+        total_ask = total_ask_p[0]
+
+        # Pass 2: fill — allocate output arrays sized from pass 1 and fill them
+        bid_data = np.empty(total_bid * 2, dtype=np.float64)
+        ask_data = np.empty(total_ask * 2, dtype=np.float64)
+        _call(
+            _p(bid_data, "double *") if total_bid > 0 else ffi.NULL,
+            _p(ask_data, "double *") if total_ask > 0 else ffi.NULL,
+        )
+
+        # Reconstruct (ts, bid_dict, ask_dict) from flat CSR arrays.
+        # Use arr[::2].tolist() + arr[1::2].tolist() instead of element-by-element
+        # float(arr[j]) indexing: .tolist() converts a whole numpy column to Python
+        # floats in one C-speed pass, making dict construction ~10× faster for deep books.
+        for i in range(n_ts):
+            t = int(out_ts_arr[i])
+            b0 = int(out_bid_offs[i]) * 2
+            b1 = int(out_bid_offs[i + 1]) * 2
+            a0 = int(out_ask_offs[i]) * 2
+            a1 = int(out_ask_offs[i + 1]) * 2
+            bf = bid_data[b0:b1]
+            af = ask_data[a0:a1]
+            yield (
+                t,
+                dict(zip(bf[::2].tolist(), bf[1::2].tolist())),
+                dict(zip(af[::2].tolist(), af[1::2].tolist())),
+            )
+
+    def _seq_states_csr(self):
+        """
+        (Lazy mode only) Run a single C forward pass and return raw CSR LOB state arrays.
+
+        Returns
+        -------
+        lob_ts    : np.ndarray[int64,   shape=(n,)]    LOB-change timestamps
+        bid_offs  : np.ndarray[int32,   shape=(n+1,)]  CSR row offsets for bids
+        ask_offs  : np.ndarray[int32,   shape=(n+1,)]  CSR row offsets for asks
+        bid_data  : np.ndarray[float64, shape=(2*B,)]  flat [price,qty,...] bids (descending)
+        ask_data  : np.ndarray[float64, shape=(2*A,)]  flat [price,qty,...] asks (ascending)
+
+        Each LOB state i uses bid_data[bid_offs[i]*2 : bid_offs[i+1]*2] (similarly for asks).
+        bid_data[bid_offs[i]*2] is the best bid (highest); ask_data[ask_offs[i]*2] is the best ask.
+        """
+        all_ts = self.timestamps
+        if not all_ts:
+            empty_offs = np.zeros(1, dtype=np.int32)
+            return (
+                np.empty(0, np.int64),
+                empty_offs,
+                empty_offs.copy(),
+                np.empty(0, np.float64),
+                np.empty(0, np.float64),
+            )
+
+        n_ts = len(all_ts)
+        all_ts_arr = np.asarray(all_ts, dtype=np.int64)
+        first_ts = all_ts[0]
+        last_ts = all_ts[-1]
+
+        n_ckpts = len(self._ckpt_ts)
+        anchor_idx = (
+            int(np.searchsorted(self._ckpt_ts, first_ts, side="right")) - 1 if n_ckpts > 0 else -1
+        )
+        anchor_ts = int(self._ckpt_ts[anchor_idx]) if anchor_idx >= 0 else None
+
+        if len(self._delta_log) > 0:
+            lo = int(
+                np.searchsorted(
+                    self._delta_log["ts"],
+                    anchor_ts if anchor_ts is not None else first_ts,
+                    side="left",
                 )
+            )
+            hi = int(np.searchsorted(self._delta_log["ts"], last_ts, side="right"))
+            deltas = self._delta_log[lo:hi]
+        else:
+            deltas = self._delta_log
+        n_deltas = len(deltas)
 
-            while delta_idx < len(deltas) and deltas["ts"][delta_idx] == t:
-                side_int = int(deltas["side"][delta_idx])
-                price = float(deltas["price"][delta_idx])
-                qty = float(deltas["qty"][delta_idx])
-                if side_int == 0:
-                    if qty == 0.0:
-                        bid_dict.pop(price, None)
-                    else:
-                        bid_dict[price] = qty
-                else:
-                    if qty == 0.0:
-                        ask_dict.pop(price, None)
-                    else:
-                        ask_dict[price] = qty
-                delta_idx += 1
+        if n_ckpts > 0:
+            bid_offs_c = np.empty(n_ckpts + 1, dtype=np.int32)
+            ask_offs_c = np.empty(n_ckpts + 1, dtype=np.int32)
+            bid_offs_c[0] = ask_offs_c[0] = 0
+            for k, cts in enumerate(self._ckpt_ts):
+                bids_a, asks_a = self._ckpts[int(cts)]
+                bid_offs_c[k + 1] = bid_offs_c[k] + len(bids_a)
+                ask_offs_c[k + 1] = ask_offs_c[k] + len(asks_a)
+            total_bid_ckpt = int(bid_offs_c[n_ckpts])
+            total_ask_ckpt = int(ask_offs_c[n_ckpts])
+            ckpt_bids_flat = np.empty(total_bid_ckpt * 2, dtype=np.float64)
+            ckpt_asks_flat = np.empty(total_ask_ckpt * 2, dtype=np.float64)
+            for k, cts in enumerate(self._ckpt_ts):
+                bids_a, asks_a = self._ckpts[int(cts)]
+                b0 = int(bid_offs_c[k]) * 2
+                b1 = int(bid_offs_c[k + 1]) * 2
+                if b1 > b0:
+                    ckpt_bids_flat[b0:b1] = bids_a.ravel()
+                a0 = int(ask_offs_c[k]) * 2
+                a1 = int(ask_offs_c[k + 1]) * 2
+                if a1 > a0:
+                    ckpt_asks_flat[a0:a1] = asks_a.ravel()
 
-            yield t, dict(bid_dict), dict(ask_dict)
+        if n_deltas > 0:
+            dl_ts = np.ascontiguousarray(deltas["ts"])
+            dl_side = np.ascontiguousarray(deltas["side"])
+            dl_price = np.ascontiguousarray(deltas["price"])
+            dl_qty = np.ascontiguousarray(deltas["qty"])
+
+        def _p(arr, ct):
+            return ffi.cast(ct, arr.ctypes.data)
+
+        c_all_ts = _p(all_ts_arr, "const long long *")
+        c_ckpt_ts = _p(self._ckpt_ts, "const long long *") if n_ckpts > 0 else ffi.NULL
+        c_bid_offs = _p(bid_offs_c, "const int *") if n_ckpts > 0 else ffi.NULL
+        c_ckbids = (
+            _p(ckpt_bids_flat, "const double *") if n_ckpts > 0 and total_bid_ckpt > 0 else ffi.NULL
+        )
+        c_ask_offs = _p(ask_offs_c, "const int *") if n_ckpts > 0 else ffi.NULL
+        c_ckasks = (
+            _p(ckpt_asks_flat, "const double *") if n_ckpts > 0 and total_ask_ckpt > 0 else ffi.NULL
+        )
+        c_dl_ts = _p(dl_ts, "const long long *") if n_deltas > 0 else ffi.NULL
+        c_dl_side = _p(dl_side, "const uint8_t *") if n_deltas > 0 else ffi.NULL
+        c_dl_price = _p(dl_price, "const double *") if n_deltas > 0 else ffi.NULL
+        c_dl_qty = _p(dl_qty, "const double *") if n_deltas > 0 else ffi.NULL
+
+        out_ts_arr = np.empty(n_ts, dtype=np.int64)
+        out_bid_offs = np.empty(n_ts + 1, dtype=np.int32)
+        out_ask_offs = np.empty(n_ts + 1, dtype=np.int32)
+        total_bid_p = ffi.new("int *")
+        total_ask_p = ffi.new("int *")
+
+        def _call(bid_data_ptr, ask_data_ptr):
+            lib.lobts_iter_seq_states(
+                c_all_ts,
+                n_ts,
+                c_ckpt_ts,
+                n_ckpts,
+                c_bid_offs,
+                c_ckbids,
+                c_ask_offs,
+                c_ckasks,
+                c_dl_ts,
+                c_dl_side,
+                c_dl_price,
+                c_dl_qty,
+                n_deltas,
+                anchor_idx,
+                _p(out_ts_arr, "long long *"),
+                _p(out_bid_offs, "int *"),
+                _p(out_ask_offs, "int *"),
+                bid_data_ptr,
+                ask_data_ptr,
+                total_bid_p,
+                total_ask_p,
+            )
+
+        _call(ffi.NULL, ffi.NULL)
+        total_bid = total_bid_p[0]
+        total_ask = total_ask_p[0]
+
+        bid_data = np.empty(total_bid * 2, dtype=np.float64)
+        ask_data = np.empty(total_ask * 2, dtype=np.float64)
+        _call(
+            _p(bid_data, "double *") if total_bid > 0 else ffi.NULL,
+            _p(ask_data, "double *") if total_ask > 0 else ffi.NULL,
+        )
+
+        return out_ts_arr, out_bid_offs, out_ask_offs, bid_data, ask_data
 
     def build_checkpoints(self, n=_AUTO_CHECKPOINTS):
         """

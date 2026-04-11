@@ -64,8 +64,6 @@ target-version = "py38"
 exclude = ["examples/itch.py"]
 
 [tool.ruff.lint.per-file-ignores]
-"lobpy/sortedlist.py" = ["N805"]
-"lobpy/sortedset.py" = ["N805"]
 "tests/test_lob.py" = ["F401"]
 "tests/test_lobts.py" = ["F401"]
 "lobpy/gueant.py" = ["N806"]
@@ -86,14 +84,6 @@ module = "pandas"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = "lobpy.sortedlist"
-ignore_errors = true
-
-[[tool.mypy.overrides]]
-module = "lobpy.sortedset"
-ignore_errors = true
-
-[[tool.mypy.overrides]]
 module = "pyarrow"
 ignore_missing_imports = true
 
@@ -106,5 +96,28 @@ module = "pyarrow.parquet"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = "lobpy.sorteddict"
+module = "lobpy._cext._core"
+ignore_missing_imports = true
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = ["lobpy._cext", "lobpy._cext.*"]
+ignore_missing_imports = true
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "cffi"
+ignore_missing_imports = true
+
+# CFFI return values are typed as Any; suppress resulting annotation mismatches.
+[[tool.mypy.overrides]]
+module = "lobpy.lob"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "lobpy.lobts"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "lobpy.tl"
 ignore_errors = true

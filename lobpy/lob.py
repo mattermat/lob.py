@@ -3,9 +3,10 @@ from typing import Any
 
 import numpy as np
 
+from lobpy._cext import ffi, lib
+
 
 def _normalize_side(side: str) -> str:
-    """Normalize side parameter to long form ('bid' or 'ask')."""
     if side in ("b", "bid"):
         return "bid"
     elif side in ("a", "ask"):
@@ -15,29 +16,47 @@ def _normalize_side(side: str) -> str:
 
 
 def _make_bid_array(levels) -> np.ndarray:
-    """Build bid array sorted descending by price from a list of (price, qty) pairs."""
     if not len(levels):
         return np.empty((0, 2), dtype=np.float64)
     arr = np.array(levels, dtype=np.float64)
-    return arr[np.argsort(-arr[:, 0])]  # type: ignore[no-any-return]
+    return arr[np.argsort(-arr[:, 0])]
 
 
 def _make_ask_array(levels) -> np.ndarray:
-    """Build ask array sorted ascending by price from a list of (price, qty) pairs."""
     if not len(levels):
         return np.empty((0, 2), dtype=np.float64)
     arr = np.array(levels, dtype=np.float64)
-    return arr[np.argsort(arr[:, 0])]  # type: ignore[no-any-return]
+    return arr[np.argsort(arr[:, 0])]
+
+
+def _levels_to_arrays(levels):
+    """Return (prices, qtys) as contiguous float64 arrays.  Caller must keep
+    the arrays alive for as long as any C pointer into them is in use."""
+    if not levels:
+        return np.empty(0, dtype=np.float64), np.empty(0, dtype=np.float64)
+    p_arr = np.array([float(p) for p, _ in levels], dtype=np.float64)
+    q_arr = np.array([float(q) for _, q in levels], dtype=np.float64)
+    return p_arr, q_arr
+
+
+def _get_sidebook_data(lob_ptr, getter_fn):
+    data_pp = ffi.new("const double **")
+    len_p = ffi.new("int *")
+    getter_fn(lob_ptr, data_pp, len_p)
+    n = len_p[0]
+    if n == 0:
+        return np.empty((0, 2), dtype=np.float64)
+    buf = ffi.buffer(ffi.cast("double *", data_pp[0]), n * 2 * 8)
+    flat = np.frombuffer(buf, dtype=np.float64).copy()
+    return flat.reshape(n, 2)
 
 
 class _TopValueNumericMixin:
-    """Mixin that makes an accessor behave like float(self[0]) in numeric contexts."""
-
     def __getitem__(self, index):
         raise NotImplementedError
 
     def _top(self) -> float:
-        return float(self[0])  # relies on __getitem__
+        return float(self[0])
 
     def __float__(self) -> float:
         return self._top()
@@ -45,7 +64,6 @@ class _TopValueNumericMixin:
     def __int__(self) -> int:
         return int(self._top())
 
-    # arithmetic
     def __add__(self, other: Any):
         return self._top() + float(other)
 
@@ -70,14 +88,12 @@ class _TopValueNumericMixin:
     def __rtruediv__(self, other: Any):
         return float(other) / self._top()
 
-    # unary
     def __neg__(self):
         return -self._top()
 
     def __abs__(self):
         return abs(self._top())
 
-    # comparisons (optional but usually expected)
     def __lt__(self, other: Any) -> bool:
         return self._top() < float(other)
 
@@ -93,7 +109,7 @@ class _TopValueNumericMixin:
 
 class PriceAccessor(_TopValueNumericMixin):
     def __init__(self, arr: np.ndarray):
-        self._arr = arr  # shape (n, 2), col 0 = price
+        self._arr = arr
 
     def __getitem__(self, index):
         if index < len(self._arr):
@@ -111,7 +127,7 @@ class PriceAccessor(_TopValueNumericMixin):
 
 class QuantityAccessor(_TopValueNumericMixin):
     def __init__(self, arr: np.ndarray):
-        self._arr = arr  # shape (n, 2), col 1 = qty
+        self._arr = arr
 
     def __getitem__(self, index):
         if index < len(self._arr):
@@ -151,271 +167,198 @@ class LOB:
     def __init__(self, name=None, tick_size=1, *, bids=None, asks=None) -> None:
         if name is None:
             name = f"lob{id(self)}"
-        self.name = name
-        self.tick_size = tick_size
-        self.timestamp = int(time.time() * 1000)
-        self._crossing_detected = False
-        self._bids = _make_bid_array(bids if bids is not None else [])
-        self._asks = _make_ask_array(asks if asks is not None else [])
+        self._tick_size = float(tick_size)
+        self._name = name
+        ts = int(time.time() * 1000)
+        self._ptr = lib.lob_create(name.encode(), float(tick_size), ts)
+        self._owns_ptr = True
+        self._bids_cache = None
+        self._asks_cache = None
+        if bids or asks:
+            self.set_snapshot(bids or [], asks or [])
+
+    @classmethod
+    def _from_ptr(cls, ptr):
+        """Wrap an existing LobBook* without taking ownership.
+
+        The caller (usually LOBts) retains ownership and is responsible for
+        keeping the underlying LobBook alive for as long as this wrapper is used.
+        """
+        obj = cls.__new__(cls)
+        obj._ptr = ptr
+        obj._owns_ptr = False
+        obj._bids_cache = None
+        obj._asks_cache = None
+        obj._tick_size = float(lib.lob_get_tick_size(ptr))
+        obj._name = ffi.string(lib.lob_name(ptr)).decode()
+        return obj
+
+    def __del__(self):
+        if hasattr(self, "_ptr") and self._ptr and getattr(self, "_owns_ptr", True):
+            lib.lob_destroy(self._ptr)
+
+    def _invalidate_cache(self):
+        self._bids_cache = None
+        self._asks_cache = None
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def tick_size(self):
+        return self._tick_size
+
+    @tick_size.setter
+    def tick_size(self, value):
+        self._tick_size = float(value)
+        lib.lob_set_tick_size(self._ptr, float(value))
 
     def _set_tick_size(self, tick_size) -> None:
         self.tick_size = tick_size
 
+    @property
+    def timestamp(self):
+        return lib.lob_timestamp(self._ptr)
+
+    @timestamp.setter
+    def timestamp(self, value):
+        lib.lob_set_timestamp(self._ptr, int(value))
+
+    @property
+    def _bids(self) -> np.ndarray:
+        if self._bids_cache is None:
+            self._bids_cache = _get_sidebook_data(self._ptr, lib.lob_get_bids)
+        return self._bids_cache
+
+    @_bids.setter
+    def _bids(self, value):
+        self._bids_cache = value
+
+    @property
+    def _asks(self) -> np.ndarray:
+        if self._asks_cache is None:
+            self._asks_cache = _get_sidebook_data(self._ptr, lib.lob_get_asks)
+        return self._asks_cache
+
+    @_asks.setter
+    def _asks(self, value):
+        self._asks_cache = value
+
     def set_snapshot(self, bids, asks, timestamp=0):
-        """
-        align the order book to a snapshot
-        """
-        self._bids = _make_bid_array(bids)
-        self._asks = _make_ask_array(asks)
-        self.timestamp = timestamp
+        b_prices, b_qtys = _levels_to_arrays(bids)
+        a_prices, a_qtys = _levels_to_arrays(asks)
+        bn = len(b_prices)
+        an = len(a_prices)
+        bp = ffi.cast("double *", b_prices.ctypes.data) if bn else ffi.NULL
+        bq = ffi.cast("double *", b_qtys.ctypes.data) if bn else ffi.NULL
+        ap = ffi.cast("double *", a_prices.ctypes.data) if an else ffi.NULL
+        aq = ffi.cast("double *", a_qtys.ctypes.data) if an else ffi.NULL
+        lib.lob_set_snapshot(self._ptr, int(timestamp), bp, bq, bn, ap, aq, an)
+        self._invalidate_cache()
 
     def set_updates(self, updates, timestamp=0):
-        """
-        Push multiple updates to the order book at once.
-
-        Args:
-            updates: List of (side, price, size) tuples where:
-                - side: 'b' or 'bid' for bids, 'a' or 'ask' for asks
-                - price: price level
-                - size: quantity (0 to delete level)
-            timestamp: Optional timestamp for the updates
-
-        Note:
-            Updates are applied atomically - all or nothing.
-        """
-        save_bids = dict(self._bids)
-        save_asks = dict(self._asks)
-
-        for side, price, size in updates:
-            side = _normalize_side(side)
-            if side == "bid":
-                if size == 0:
-                    save_bids.pop(price, None)
-                else:
-                    save_bids[price] = size
-            else:
-                if size == 0:
-                    save_asks.pop(price, None)
-                else:
-                    save_asks[price] = size
-
-        self._bids = _make_bid_array(list(save_bids.items()))
-        self._asks = _make_ask_array(list(save_asks.items()))
-
-        if timestamp != 0:
-            self.timestamp = timestamp
+        if not updates:
+            return
+        n = len(updates)
+        sides = np.empty(n, dtype=np.uint8)
+        prices = np.empty(n, dtype=np.float64)
+        qtys = np.empty(n, dtype=np.float64)
+        for i, (side, price, size) in enumerate(updates):
+            s = _normalize_side(side)
+            sides[i] = 0 if s == "bid" else 1
+            prices[i] = float(price)
+            qtys[i] = float(size)
+        s_ptr = ffi.cast("uint8_t *", sides.ctypes.data)
+        p_ptr = ffi.cast("double *", prices.ctypes.data)
+        q_ptr = ffi.cast("double *", qtys.ctypes.data)
+        lib.lob_set_updates(self._ptr, int(timestamp), s_ptr, p_ptr, q_ptr, n)
+        self._invalidate_cache()
 
     def _delete_level(self, side, price_level, timestamp=0):
-        if timestamp != 0:
-            self.timestamp = timestamp
-
         side = _normalize_side(side)
         if side == "bid":
-            self._delete_bid_level(price_level)
+            self._delete_bid_level(price_level, timestamp)
         elif side == "ask":
-            self._delete_ask_level(price_level)
+            self._delete_ask_level(price_level, timestamp)
 
     def _delete_ask_level(self, price_level, timestamp=0):
-        if timestamp != 0:
-            self.timestamp = timestamp
-        if len(self._asks) == 0:
-            print(f"price level {price_level} not existing on ask side")
-            return
-        mask = self._asks[:, 0] != price_level
-        if mask.all():
-            print(f"price level {price_level} not existing on ask side")
-            return
-        self._asks = self._asks[mask]
+        lib.lob_delete_ask(self._ptr, int(timestamp), float(price_level))
+        self._invalidate_cache()
 
     def _delete_bid_level(self, price_level, timestamp=0):
-        if timestamp != 0:
-            self.timestamp = timestamp
-        if len(self._bids) == 0:
-            print(f"price level {price_level} not existing on bid side")
-            return
-        mask = self._bids[:, 0] != price_level
-        if mask.all():
-            print(f"price level {price_level} not existing on bid side")
-            return
-        self._bids = self._bids[mask]
+        lib.lob_delete_bid(self._ptr, int(timestamp), float(price_level))
+        self._invalidate_cache()
 
     def at(self, side, price) -> float:
-        """Return the quantity at a given price level, or 0 if not present."""
-        if side in ("b", "bid"):
-            arr = self._bids
-            if len(arr) == 0:
-                return 0
-            idx = np.searchsorted(-arr[:, 0], -price)
-            if idx < len(arr) and arr[idx, 0] == price:
-                return float(arr[idx, 1])
-            return 0
-        else:
-            arr = self._asks
-            if len(arr) == 0:
-                return 0
-            idx = np.searchsorted(arr[:, 0], price)
-            if idx < len(arr) and arr[idx, 0] == price:
-                return float(arr[idx, 1])
-            return 0
+        s = _normalize_side(side)
+        return lib.lob_at(self._ptr, 0 if s == "bid" else 1, float(price))
 
     def update(self, side, price_level, size, timestamp=0):
-        if timestamp != 0:
-            self.timestamp = timestamp
-
         if size == 0:
-            self._delete_level(side, price_level)
+            self._delete_level(side, price_level, timestamp)
             return
-
-        side = _normalize_side(side)
-        if side == "bid":
-            self._update_bid(price_level, size)
-        elif side == "ask":
-            self._update_ask(price_level, size)
-
-    def _update_ask(self, price_level, size, timestamp=0):
-        if timestamp != 0:
-            self.timestamp = timestamp
-        if size == 0:
-            self._delete_ask_level(price_level)
-            return
-        if len(self._asks) == 0:
-            self._asks = np.array([[price_level, size]], dtype=np.float64)
-            return
-        prices = self._asks[:, 0]
-        idx = np.searchsorted(prices, price_level)
-        if idx < len(prices) and prices[idx] == price_level:
-            self._asks[idx, 1] = size
-        else:
-            self._asks = np.insert(self._asks, idx, [price_level, size], axis=0)
+        s = _normalize_side(side)
+        lib.lob_update_level(
+            self._ptr, int(timestamp), 0 if s == "bid" else 1, float(price_level), float(size)
+        )
+        self._invalidate_cache()
 
     def _update_bid(self, price_level, size, timestamp=0):
-        if timestamp != 0:
-            self.timestamp = timestamp
         if size == 0:
-            self._delete_bid_level(price_level)
+            self._delete_bid_level(price_level, timestamp)
             return
-        if len(self._bids) == 0:
-            self._bids = np.array([[price_level, size]], dtype=np.float64)
+        lib.lob_update_level(self._ptr, int(timestamp), 0, float(price_level), float(size))
+        self._invalidate_cache()
+
+    def _update_ask(self, price_level, size, timestamp=0):
+        if size == 0:
+            self._delete_ask_level(price_level, timestamp)
             return
-        prices = self._bids[:, 0]
-        idx = np.searchsorted(-prices, -price_level)
-        if idx < len(prices) and prices[idx] == price_level:
-            self._bids[idx, 1] = size
-        else:
-            self._bids = np.insert(self._bids, idx, [price_level, size], axis=0)
+        lib.lob_update_level(self._ptr, int(timestamp), 1, float(price_level), float(size))
+        self._invalidate_cache()
 
     @property
     def ask(self):
-        """
-        get the best ask price
-        """
         return PriceAccessor(self._asks)
 
     @property
     def bid(self):
-        """
-        get the best bid price
-        """
         return PriceAccessor(self._bids)
 
     @property
     def spread(self):
-        """
-        get the bid-ask spread (ask price - bid price)
-        """
-        ask_price = self.ask[0]
-        bid_price = self.bid[0]
-        if ask_price > 0 and bid_price > 0:
-            return ask_price - bid_price
-        return float("nan")
+        return lib.lob_spread(self._ptr)
 
     @property
     def spread_tick(self):
-        """
-        get the spread in ticks
-        """
-        spread = self.spread
-        if spread != spread:
-            return float("nan")
-        return spread / self.tick_size
+        return lib.lob_spread_tick(self._ptr)
 
     @property
     def spread_rel(self):
-        """
-        get the spread as percentage of the bid level
-        """
-        bid_price = self.bid[0]
-        if bid_price > 0:
-            return self.spread / bid_price
-        return float("nan")
+        return lib.lob_spread_rel(self._ptr)
 
     @property
     def midprice(self):
-        """
-        get the mid-price (bid + ask) / 2
-        """
-        ask_price = self.ask[0]
-        bid_price = self.bid[0]
-        if ask_price > 0 and bid_price > 0:
-            return (bid_price + ask_price) / 2
-        return float("nan")
+        return lib.lob_midprice(self._ptr)
 
     @property
     def vw_midprice(self):
-        """
-        get the volume-weighted mid-price
-        """
-        ask_price = self.ask[0]
-        bid_price = self.bid[0]
-        ask_size = self.askq[0]
-        bid_size = self.bidq[0]
-        if ask_price > 0 and bid_price > 0 and ask_size > 0 and bid_size > 0:
-            total_size = ask_size + bid_size
-            return (bid_price * bid_size + ask_price * ask_size) / total_size
-        return float("nan")
+        return lib.lob_vw_midprice(self._ptr)
 
     @property
     def bidq(self):
-        """
-        get the best bid size (indexable)
-        """
         return QuantityAccessor(self._bids)
 
     @property
     def askq(self):
-        """
-        get the best ask size (indexable)
-        """
         return QuantityAccessor(self._asks)
 
     @property
     def vi(self):
-        """
-        get the volume imbalance with indexing support
-        """
         return VolumeImbalanceAccessor(self._bids, self._asks)
 
     def get_delta(self, bids, asks, timestamp=0):
-        """
-        Compare the provided snapshot with the current internal state and return deltas.
-
-        Args:
-            bids: List of (price, quantity) tuples for bid side
-            asks: List of (price, quantity) tuples for ask side
-            timestamp: Optional timestamp for the snapshot
-
-        Returns:
-            A tuple of (bid_deltas, ask_deltas) where each is a list of (price, quantity) tuples.
-            quantity=0.0 means the level should be deleted.
-
-        After computing deltas, updates the internal state to the new snapshot.
-
-        Example:
-            Current state: bids = [(100, 10), (99, 5)]
-            New snapshot:  bids = [(100, 15), (98, 3)]
-            Delta output:  [(100, 15), (99, 0.0), (98, 3)]
-                          # 100 changed, 99 deleted, 98 new
-        """
         bid_deltas = []
         ask_deltas = []
 
@@ -441,26 +384,20 @@ class LOB:
             if price not in new_asks:
                 ask_deltas.append((price, 0.0))
 
-        self._bids = _make_bid_array(list(new_bids.items()))
-        self._asks = _make_ask_array(list(new_asks.items()))
-
-        if timestamp != 0:
-            self.timestamp = timestamp
+        b_prices, b_qtys = _levels_to_arrays(bids)
+        a_prices, a_qtys = _levels_to_arrays(asks)
+        bn = len(b_prices)
+        an = len(a_prices)
+        bp = ffi.cast("double *", b_prices.ctypes.data) if bn else ffi.NULL
+        bq = ffi.cast("double *", b_qtys.ctypes.data) if bn else ffi.NULL
+        ap = ffi.cast("double *", a_prices.ctypes.data) if an else ffi.NULL
+        aq = ffi.cast("double *", a_qtys.ctypes.data) if an else ffi.NULL
+        lib.lob_set_snapshot(self._ptr, int(timestamp), bp, bq, bn, ap, aq, an)
+        self._invalidate_cache()
 
         return (bid_deltas, ask_deltas)
 
     def to_np(self, side=None, nlevels=None):
-        """
-        Export order book to numpy array.
-
-        Args:
-            side: 'b' for bids, 'a' for asks, or None for both sides
-            nlevels: number of top levels to export (default: all levels)
-
-        Returns:
-            2D array with shape (n, 2) [price, size] when side specified
-            2D array with shape (n, 3) [side, price, size] when side=None
-        """
         if side == "b":
             arr = self._bids[:nlevels] if nlevels is not None else self._bids
             return arr.copy() if len(arr) > 0 else np.empty((0, 2))
@@ -488,25 +425,12 @@ class LOB:
             return np.array(data, dtype=object)
 
     def to_pd(self, side=None, nlevels=None):
-        """
-        Export order book to pandas DataFrame.
-
-        Args:
-            side: 'b' for bids, 'a' for asks, or None for both sides
-            nlevels: number of top levels to export (default: all levels)
-
-        Returns:
-            DataFrame with columns ['price', 'size'] when side specified
-            DataFrame with columns ['price', 'size', 'side'] when side=None
-
-        Raises:
-            ImportError: If pandas is not installed
-        """
         try:
-            import pandas as pd  # type: ignore
+            import pandas as pd
         except ImportError as e:
             raise ImportError(
-                "pandas is required for to_pd() method. Install it with: pip install pandas[export]"
+                "pandas is required for to_pd() method. "
+                "Install it with: pip install pandas[export]"
             ) from e
 
         if side == "b":
@@ -533,133 +457,45 @@ class LOB:
             return pd.DataFrame(data, columns=["price", "size", "side"])
 
     def to_csv(self, path, side=None, nlevels=None):
-        """
-        Export order book to CSV file.
-
-        Args:
-            path: file path for CSV output
-            side: 'b' for bids, 'a' for asks, or None for both sides
-            nlevels: number of top levels to export (default: all levels)
-        """
         df = self.to_pd(side, nlevels)
         df.to_csv(path, index=False)
 
     def to_xlsx(self, path, side=None, nlevels=None):
-        """
-        Export order book to XLSX file.
-
-        Args:
-            path: file path for XLSX output
-            side: 'b' for bids, 'a' for asks, or None for both sides
-            nlevels: number of top levels to export (default: all levels)
-        """
         df = self.to_pd(side, nlevels)
         df.to_excel(path, index=False, engine="openpyxl")
 
     def to_parquet(self, path, side=None, nlevels=None):
-        """
-        Export order book to Parquet file.
-
-        Args:
-            path: file path for Parquet output
-            side: 'b' for bids, 'a' for asks, or None for both sides
-            nlevels: number of top levels to export (default: all levels)
-        """
         df = self.to_pd(side, nlevels)
         df.to_parquet(path, engine="pyarrow")
 
     def check(self):
-        """
-        Check consistency of the order book.
-
-        Returns:
-            True if the book is consistent (best bid < best ask or one side empty),
-            False if the book is crossed (best bid >= best ask).
-        """
-        if len(self._bids) == 0 or len(self._asks) == 0:
-            return True
-        return float(self._bids[0, 0]) < float(self._asks[0, 0])
+        return bool(lib.lob_check(self._ptr))
 
     def get_slippage(self, volume, side="midprice"):
-        """
-        Calculate the slippage from the top level.
-
-        Args:
-            volume: volume to execute
-            side: 'midprice', 'a'/'ask', or 'b'/'bid'
-
-        Returns:
-            slippage in price units
-        """
         if volume <= 0:
             return 0.0
-
         if side == "midprice":
             return 0.0
-
         side = _normalize_side(side)
         if side == "ask":
-            remaining = volume
-            total_cost = 0.0
-            for price, size in self._asks:
-                if remaining <= 0:
-                    break
-                take = min(remaining, size)
-                total_cost += take * price
-                remaining -= take
-            if remaining > 0:
-                return float("inf")
-            return total_cost / volume - self.midprice
+            return lib.lob_slippage(self._ptr, float(volume), 1)
         elif side == "bid":
-            remaining = volume
-            total_cost = 0.0
-            for price, size in self._bids:
-                if remaining <= 0:
-                    break
-                take = min(remaining, size)
-                total_cost += take * price
-                remaining -= take
-            if remaining > 0:
-                return float("inf")
-            return self.midprice - total_cost / volume
+            return lib.lob_slippage(self._ptr, float(volume), 0)
         else:
             raise ValueError(f"Invalid side: {side}. Must be 'midprice', 'a'/'ask', or 'b'/'bid'.")
 
     def len_in_tick(self, side, price):
-        """
-        Return the number of ticks the provided price is far from the top of the book.
-
-        Args:
-            side: 'b' or 'bid' for bids, 'a' or 'ask' for asks
-            price: price level to check
-
-        Returns:
-            number of ticks from the top level
-        """
         side = _normalize_side(side)
         if side == "bid":
-            best_price = self.bid[0]
-            if best_price <= 0:
-                return float("inf")
-            return int(round((best_price - price) / self.tick_size))
+            result = lib.lob_len_in_tick(self._ptr, 0, float(price))
+            return result if result >= 0 else float("inf")
         elif side == "ask":
-            best_price = self.ask[0]
-            if best_price <= 0:
-                return float("inf")
-            return int(round((price - best_price) / self.tick_size))
+            result = lib.lob_len_in_tick(self._ptr, 1, float(price))
+            return result if result >= 0 else float("inf")
         else:
             raise ValueError(f"Invalid side: {side}. Must be 'b'/'bid' or 'a'/'ask'.")
 
     def diff(self, other):
-        """
-        Difference between two LOB. Returns the updates needed to change self to other.
-
-        Args:
-            other: LOB object to compare against
-
-        Returns:
-            List of (side, price, size) tuples where size=0 means delete level
-        """
         updates = []
 
         self_bids = dict(self._bids)
@@ -686,48 +522,18 @@ class LOB:
         return updates
 
     def aggq(self, side, nlevel=None, ticks=None, price=None):
-        """
-        Aggregate order book quantities based on the specified criteria.
-
-        Args:
-            side: 'b' or 'bid' for bids, 'a' or 'ask' for asks
-                  - which side of the order book to aggregate
-            nlevel: number of top levels to aggregate (e.g., nlevel=3 for top 3 levels)
-            ticks: tick distance from the best price to aggregate
-            price: price level to aggregate at or beyond
-
-        Returns:
-            Total aggregated quantity for the specified criteria
-
-        Raises:
-            ValueError: if side is invalid or no aggregation criterion is specified
-        """
         side = _normalize_side(side)
         if side not in ("bid", "ask"):
             raise ValueError(f"Invalid side: {side}. Must be 'b'/'bid' or 'a'/'ask'.")
 
-        arr = self._bids if side == "bid" else self._asks
-
-        if len(arr) == 0:
-            return 0.0
+        s = 0 if side == "bid" else 1
 
         if nlevel is not None:
-            return float(arr[:nlevel, 1].sum())
+            return lib.lob_aggq_nlevel(self._ptr, s, nlevel)
         elif ticks is not None:
-            best_price = arr[0, 0]
-            if best_price <= 0:
-                return 0.0
-            if side == "bid":
-                min_price = best_price - ticks * self.tick_size
-                return float(arr[arr[:, 0] >= min_price, 1].sum())
-            else:
-                max_price = best_price + ticks * self.tick_size
-                return float(arr[arr[:, 0] <= max_price, 1].sum())
+            return lib.lob_aggq_ticks(self._ptr, s, ticks)
         elif price is not None:
-            if side == "bid":
-                return float(arr[arr[:, 0] >= price, 1].sum())
-            else:
-                return float(arr[arr[:, 0] <= price, 1].sum())
+            return lib.lob_aggq_price(self._ptr, s, float(price))
         else:
             raise ValueError("Must specify one of: nlevel, ticks, or price")
 

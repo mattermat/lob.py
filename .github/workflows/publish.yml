@@ -5,30 +5,75 @@ on:
     types: [published]
 
 jobs:
-  pypi-publish:
-    name: Upload release to PyPI
+  build-wheels:
+    name: Build wheels on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v2.21.3
+        env:
+          # Build for CPython 3.8–3.12 only (no PyPy — CFFI works but rarely needed)
+          CIBW_BUILD: "cp38-* cp39-* cp310-* cp311-* cp312-*"
+          # Skip 32-bit Windows and musllinux (not worth the maintenance)
+          CIBW_SKIP: "*-win32 *-musllinux*"
+          # macOS: build for both Intel and Apple Silicon
+          CIBW_ARCHS_MACOS: "x86_64 arm64"
+          # Run the CFFI build step inside the wheel build environment
+          CIBW_BUILD_FRONTEND: "build"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: ./wheelhouse/*.whl
+
+  build-sdist:
+    name: Build source distribution
     runs-on: ubuntu-latest
-    # Publish all releases
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build
+        run: pip install build
+
+      - name: Build sdist
+        run: python -m build --sdist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  pypi-publish:
+    name: Upload to PyPI
+    needs: [build-wheels, build-sdist]
+    runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
-      id-token: write  # REQUIRED for trusted publishing
+      id-token: write
       contents: read
+
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/download-artifact@v4
         with:
-          python-version: "3.10"
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist/
 
-      - name: Install build dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install build
-
-      - name: Build package
-        run: python -m build
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: dist/
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
