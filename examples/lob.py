@@ -83,7 +83,3 @@ comp_book = LOB(
 
 # comparison
 print(base_book.diff(comp_book))  # noqa: E501
-
-# TODO: fix the following: should return one char for the side ('a' instead of 'ask') and the quantity should be np.float64 as well
-# returns
-# [('bid', np.float64(99.8), 0), ('ask', np.float64(99.9), np.float64(15.0)), ('ask', np.float64(100.1), 0)]

@@ -505,21 +505,22 @@ class LOB:
 
         for price, size in other_bids.items():
             if self_bids.get(price) != size:
-                updates.append(("bid", price, size))
+                updates.append(["b", price, size])
 
         for price in self_bids:
             if price not in other_bids:
-                updates.append(("bid", price, 0))
+                updates.append(["b", price, np.float64(0)])
 
         for price, size in other_asks.items():
             if self_asks.get(price) != size:
-                updates.append(("ask", price, size))
+                update = ["a", price, size]
+                updates.append(update)
 
         for price in self_asks:
             if price not in other_asks:
-                updates.append(("ask", price, 0))
+                updates.append(["a", price, np.float64(0)])
 
-        return updates
+        return np.array(updates, dtype=object)
 
     def aggq(self, side, nlevel=None, ticks=None, price=None):
         side = _normalize_side(side)
