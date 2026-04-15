@@ -110,7 +110,7 @@ Reference: Guéant, Lehalle, Fernandez-Tapia (2013).
     - bid side: `δ = (best_ask − trade_price) / tick_size`
 
 ### I/O
-- `from_parquet(path)`: load LOB and trade events from a Parquet file into this `TL` instance
+- `from_parquet(path, mode='lazy')`: load LOB and trade events from a Parquet file into this `TL` instance
   - expected columns: `timestamp`, `event_type`, `side`, `price`, `quantity`
   - `event_type` values:
     - `'book_level'`: rows forming a full LOB snapshot; all rows at the same timestamp form one snapshot
@@ -118,3 +118,6 @@ Reference: Guéant, Lehalle, Fernandez-Tapia (2013).
     - `'trade'`: individual trade events
   - `side` values: LOB rows use `'bid'`/`'ask'`; trade rows use `'buy'`/`'sell'`
   - within the same timestamp, processing order is: `book_level` → `book_update` → `trade`
+  - `mode`: `'lazy'` (default) or `'eager'`
+    - **`'lazy'`**: LOB data is loaded as checkpoints + a delta log (vectorised via pyarrow); `build_checkpoints()` is called automatically. Dramatically lower memory for large files.
+    - **`'eager'`**: every snapshot/update is expanded into a full `LobBook` in C memory immediately. Simpler but uses O(N × L) memory.
