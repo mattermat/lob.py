@@ -38,9 +38,8 @@ np.testing.assert_almost_equal(lob.spread_tick, 3)
 np.testing.assert_almost_equal(lob.midprice, (lob.bid + lob.ask) / 2)
 np.testing.assert_almost_equal(lob.midprice, 99.95)
 
-# TODO: fix lob.spread_rel
-#np.testing.assert_almost_equal(lob.spread_rel, lob.spread / lob.midprice)
-#np.testing.assert_almost_equal(lob.spread_rel, 0.3 / 99.95)
+np.testing.assert_almost_equal(lob.spread_rel, lob.spread / lob.midprice)
+np.testing.assert_almost_equal(lob.spread_rel, 0.3 / 99.95)
 
 np.testing.assert_almost_equal(lob.vw_midprice, (lob.bid * lob.bidq + lob.ask * lob.askq) / (lob.bidq + lob.askq))
 np.testing.assert_almost_equal(lob.vw_midprice, 99.98)

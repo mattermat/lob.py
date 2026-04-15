@@ -329,9 +329,9 @@ static double lob_spread_tick(const LobBook *lob) {
 
 static double lob_spread_rel(const LobBook *lob) {
     if (lob->bids.len == 0) return NAN;
-    double bp = lob->bids.data[0];
-    if (bp <= 0) return NAN;
-    return lob_spread(lob) / bp;
+    double mp = lob_midprice(lob);
+    if (mp <= 0) return NAN;
+    return lob_spread(lob) / mp;
 }
 
 static double lob_vi(const LobBook *lob, int nlevels) {
