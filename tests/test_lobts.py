@@ -270,7 +270,10 @@ class TestLOBtsProperties:
         lobts.set_snapshot([(100, 10)], [(101, 8)], timestamp=1000)
 
         lob = lobts[1000]
-        assert lob.spread_rel == 0.01
+        expected_spread = abs(100 - 101)
+        mid_price = (100 + 101) / 2
+        expected_spread_rel = expected_spread / mid_price
+        assert lob.spread_rel == expected_spread_rel
 
     def test_midprice_at_timestamp(self):
         """Test getting mid-price at timestamp."""
