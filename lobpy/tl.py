@@ -421,6 +421,91 @@ class TL:
             return 0.0
         return (buy_vol - sell_vol) / total
 
+    def hawkes(self, side=None, window_size=None):
+        """
+        Fit a univariate exponential Hawkes process to trade timestamps.
+
+        λ(t) = μ + Σᵢ α · exp(−β · (t − tᵢ))
+
+        Parameters are always in SI units — μ and α in events/second, β in 1/second —
+        regardless of the TL's timestamp_unit.
+
+        Args:
+            side:        None = all trades, 'b' = buy-aggressors only,
+                         's' = sell-aggressors only.
+            window_size: None  → scalar fit over all trades; returns dict.
+                         N     → rolling fit at each trade timestamp; returns
+                                 pd.DataFrame. N is in the same timestamp units
+                                 as all other TL methods.
+
+        Returns:
+            dict with keys 'mu', 'alpha', 'beta', 'branching_ratio' (all floats)
+            when window_size is None.
+
+            pd.DataFrame with those four columns, indexed by trade timestamps
+            (in original timestamp units), when window_size is given.
+
+            Returns nan / empty DataFrame if fewer than 3 trades are available.
+
+        Notes:
+            branching_ratio = α / β.  Values ≥ 1 indicate a non-stationary process
+            (the optimizer enforces < 1; fits near 1 suggest the model is a poor fit
+            or the data is too short).
+            half_life = ln(2) / β  (in seconds).
+        """
+        from .hawkes import _fit
+
+        nan = float("nan")
+        trades_list = sorted(
+            (t for t in self.trades if side is None or t.side == side),
+            key=lambda t: t.timestamp,
+        )
+
+        scale = _TS_UNITS[self.timestamp_unit]  # ticks per second
+
+        def _result(mu, alpha, beta):
+            br = alpha / beta if (np.isfinite(alpha) and np.isfinite(beta) and beta > 0.0) else nan
+            return {"mu": mu, "alpha": alpha, "beta": beta, "branching_ratio": br}
+
+        if window_size is None:
+            if len(trades_list) < 3:
+                return _result(nan, nan, nan)
+            ts_s = np.array([t.timestamp for t in trades_list], dtype=np.float64) / scale
+            ts_s -= ts_s[0]
+            mu, alpha, beta = _fit(ts_s)
+            return _result(mu, alpha, beta)
+
+        # Rolling fit at each trade timestamp
+        if not trades_list:
+            return pd.DataFrame(columns=["mu", "alpha", "beta", "branching_ratio"])
+
+        ts_s = np.array([t.timestamp for t in trades_list], dtype=np.float64) / scale
+        ts_orig = np.array([t.timestamp for t in trades_list], dtype=np.int64)
+        ws_s = window_size / scale
+
+        n = len(ts_s)
+        mus = np.full(n, nan)
+        alphas = np.full(n, nan)
+        betas = np.full(n, nan)
+        brs = np.full(n, nan)
+
+        left = 0
+        for right in range(n):
+            while ts_s[left] < ts_s[right] - ws_s:
+                left += 1
+            window = ts_s[left : right + 1] - ts_s[left]
+            mu, alpha, beta = _fit(window)
+            mus[right] = mu
+            alphas[right] = alpha
+            betas[right] = beta
+            if np.isfinite(alpha) and np.isfinite(beta) and beta > 0.0:
+                brs[right] = alpha / beta
+
+        return pd.DataFrame(
+            {"mu": mus, "alpha": alphas, "beta": betas, "branching_ratio": brs},
+            index=ts_orig,
+        )
+
     @property
     def gueant(self):
         """Accessor for Guéant intensity function parameters (λ(δ) = A·exp(-k·δ))."""

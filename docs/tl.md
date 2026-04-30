@@ -108,6 +108,40 @@
 - `tl.lob.bid_order_cancel_frequency`, `tl.lob.ask_order_cancel_frequency`: per-side cancels/sec
 - `tl.lob.order_flow_imbalance`: `pd.Series` of `OFI(t) = (bid_arr_vol − bid_can_vol) − (ask_arr_vol − ask_can_vol)` per LOB transition — see [LOBts docs](lobts.md) for full semantics
 
+### Hawkes process — `tl.hawkes()`
+
+Models trade arrival self-excitation: each trade increases the probability of subsequent trades, decaying exponentially.
+
+```
+λ(t) = μ + Σᵢ α · exp(−β · (t − tᵢ))
+```
+
+Fit via maximum likelihood (Ozaki recursive formula, O(N) per evaluation).
+
+```python
+tl.hawkes(side=None, window_size=None)
+```
+
+| Param | Description |
+|---|---|
+| `side` | `None` (all trades), `'b'` (buy-aggressors only), `'s'` (sell-aggressors only) |
+| `window_size` | `None` → scalar fit over all trades; `N` → rolling fit at each trade timestamp (N in same timestamp units as the TL) |
+
+**Returns** (scalar, `window_size=None`):
+dict with keys `'mu'`, `'alpha'`, `'beta'`, `'branching_ratio'`. All nan if fewer than 3 trades.
+
+**Returns** (rolling, `window_size=N`):
+`pd.DataFrame` with columns `['mu', 'alpha', 'beta', 'branching_ratio']` indexed by trade timestamps. Rows with fewer than 3 trades in the window contain nan.
+
+**Parameter units** — always SI (events/second for μ and α; 1/second for β), regardless of `timestamp_unit`.
+
+| Key | Meaning |
+|---|---|
+| `mu` | Baseline intensity (events/s) — background trade rate with no excitation |
+| `alpha` | Excitement jump (events/s) — how much each trade raises intensity |
+| `beta` | Decay rate (1/s) — how fast excitation fades; half-life = ln(2) / β |
+| `branching_ratio` | α / β — expected offspring per event; must be < 1 for stationarity |
+
 ### Guéant intensity function — `tl.gueant`
 Models trade arrival intensity as `λ(δ) = A · exp(−k · δ)`, where `δ` is the distance in ticks from best bid/ask.
 

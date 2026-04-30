@@ -61,10 +61,12 @@ print(f"Bid time series: {lobts.ask}")
 print(f"Ask time series: {lobts.bid}")
 print(f"Mid-price time series: {lobts.midprice}")
 
-# Arrival and cancel frequency (total)
+# Arrival and cancel volume / frequency
 print("\n=== Event Frequencies ===")
-print(f"Total arrivals: {lobts.arrival_frequency}")
-print(f"Total cancels: {lobts.cancel_frequency}")
+print(f"Total arrival volume: {lobts.order_arrival_volume}")
+print(f"Total cancel volume: {lobts.order_cancel_volume}")
+print(f"Order arrival frequency (events/s): {lobts.order_arrival_frequency}")
+print(f"Order cancel frequency (events/s): {lobts.order_cancel_frequency}")
 
 # Convert to pandas DataFrame
 print(lobts.to_pd())
@@ -80,7 +82,9 @@ print(f"Bid time series: {sliced_lobts.ask}")
 print(f"Ask time series: {sliced_lobts.bid}")
 print(f"Mid-price time series: {sliced_lobts.spread}")
 
-# Arrival and cancel frequency (total)
+# Arrival and cancel volume / frequency
 print("\n=== Event Frequencies ===")
-print(f"Total arrivals: {sliced_lobts.arrival_frequency}")
-print(f"Total cancels: {sliced_lobts.cancel_frequency}")
+print(f"Total arrival volume: {sliced_lobts.order_arrival_volume}")
+print(f"Total cancel volume: {sliced_lobts.order_cancel_volume}")
+print(f"Order arrival frequency (events/s): {sliced_lobts.order_arrival_frequency}")
+print(f"Order cancel frequency (events/s): {sliced_lobts.order_cancel_frequency}")

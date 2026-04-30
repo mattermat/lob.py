@@ -333,6 +333,23 @@ tl.vpin(window_size=None, bucket_size=None)
 
 > `VPIN = Σ|V_buy[i] − V_sell[i]| / (n × bucket_size)`. Near 0 = balanced flow; near 1 = directional/informed.
 
+### Analytics — Hawkes Process
+
+Models self-exciting trade arrival: `λ(t) = μ + Σᵢ α · exp(−β · (t − tᵢ))`.
+
+```python
+tl.hawkes(side=None, window_size=None)
+# → dict {'mu', 'alpha', 'beta', 'branching_ratio'}     (window_size=None)
+# → pd.DataFrame [mu, alpha, beta, branching_ratio]      (window_size=N)
+```
+
+| Param | Description |
+|---|---|
+| `side` | `None` = all trades; `'b'` = buy-aggressors; `'s'` = sell-aggressors |
+| `window_size` | `None` = scalar fit; `N` = rolling fit at each trade ts (same units as timestamps) |
+
+Parameters always in SI units (events/s for μ, α; 1/s for β). `branching_ratio = α/β`; must be < 1 for stationarity. Returns nan if < 3 trades in scope.
+
 ### Analytics — Guéant Intensity
 
 Models `λ(δ) = A · exp(−k · δ)` where `δ` = distance in ticks from best.
