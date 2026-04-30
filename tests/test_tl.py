@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -2488,27 +2489,34 @@ class TestTLIntegration:
             assert trade.timestamp == 1350
 
 
-def _make_parquet(tmp_path, rows):
-    """Helper: write a list of (timestamp, event_type, side, price, quantity) to parquet."""
-    schema = pa.schema(
-        [
-            pa.field("timestamp", pa.int64()),
-            pa.field("event_type", pa.string()),
-            pa.field("side", pa.string()),
-            pa.field("price", pa.float64()),
-            pa.field("quantity", pa.float64()),
-        ]
-    )
-    table = pa.Table.from_pydict(
-        {
-            "timestamp": [r[0] for r in rows],
-            "event_type": [r[1] for r in rows],
-            "side": [r[2] for r in rows],
-            "price": [r[3] for r in rows],
-            "quantity": [r[4] for r in rows],
-        },
-        schema=schema,
-    )
+def _make_parquet(tmp_path, rows, exchange_timestamps=None, sequences=None):
+    """Helper: write rows to parquet.
+
+    rows: list of (timestamp, event_type, side, price, quantity)
+    exchange_timestamps: optional list of int64, same length as rows
+    sequences: optional list of int64, same length as rows
+    """
+    fields = [
+        pa.field("timestamp", pa.int64()),
+        pa.field("event_type", pa.string()),
+        pa.field("side", pa.string()),
+        pa.field("price", pa.float64()),
+        pa.field("quantity", pa.float64()),
+    ]
+    data = {
+        "timestamp": [r[0] for r in rows],
+        "event_type": [r[1] for r in rows],
+        "side": [r[2] for r in rows],
+        "price": [r[3] for r in rows],
+        "quantity": [r[4] for r in rows],
+    }
+    if exchange_timestamps is not None:
+        fields.append(pa.field("exchange_timestamp", pa.int64()))
+        data["exchange_timestamp"] = exchange_timestamps
+    if sequences is not None:
+        fields.append(pa.field("sequence", pa.int64()))
+        data["sequence"] = sequences
+    table = pa.Table.from_pydict(data, schema=pa.schema(fields))
     path = tmp_path / "events.parquet"
     pq.write_table(table, path)
     return path
@@ -2598,3 +2606,117 @@ class TestTLFromParquet:
 
         with pytest.raises(ValueError, match="Unknown mode"):
             tl.from_parquet(path, mode="invalid")
+
+
+class TestTLExchangeTimestamps:
+    def test_lazy_exchange_timestamps_lob_only(self, tmp_path):
+        rows = [
+            (1000, "book_level", "bid", 100.0, 5.0),
+            (1000, "book_level", "ask", 101.0, 3.0),
+            (1100, "book_update", "bid", 100.0, 8.0),
+        ]
+        exch_ts = [900, 900, 1000]
+        seqs = [900, 900, 1000]
+        path = _make_parquet(tmp_path, rows, exchange_timestamps=exch_ts, sequences=seqs)
+        tl = TL()
+        tl.from_parquet(path, mode="lazy")
+        np.testing.assert_array_equal(tl.exchange_timestamps, np.array([900, 1000], dtype=np.int64))
+        np.testing.assert_array_equal(tl.sequences, np.array([900, 1000], dtype=np.int64))
+
+    def test_eager_exchange_timestamps_lob_only(self, tmp_path):
+        rows = [
+            (1000, "book_level", "bid", 100.0, 5.0),
+            (1000, "book_level", "ask", 101.0, 3.0),
+            (1100, "book_update", "bid", 100.0, 8.0),
+        ]
+        exch_ts = [900, 900, 1000]
+        seqs = [900, 900, 1000]
+        path = _make_parquet(tmp_path, rows, exchange_timestamps=exch_ts, sequences=seqs)
+        tl = TL()
+        tl.from_parquet(path, mode="eager")
+        np.testing.assert_array_equal(tl.exchange_timestamps, np.array([900, 1000], dtype=np.int64))
+        np.testing.assert_array_equal(tl.sequences, np.array([900, 1000], dtype=np.int64))
+
+    def test_lazy_exchange_timestamps_with_trades(self, tmp_path):
+        rows = [
+            (1000, "book_level", "bid", 100.0, 5.0),
+            (1000, "book_level", "ask", 101.0, 3.0),
+            (1100, "trade", "buy", 101.0, 1.0),
+            (1200, "book_update", "bid", 100.0, 7.0),
+            (1300, "trade", "sell", 100.0, 0.5),
+        ]
+        exch_ts = [900, 900, 1050, 1100, 1250]
+        seqs = [900, 900, 1050, 1100, 1250]
+        path = _make_parquet(tmp_path, rows, exchange_timestamps=exch_ts, sequences=seqs)
+        tl = TL()
+        tl.from_parquet(path, mode="lazy")
+        np.testing.assert_array_equal(
+            tl.exchange_timestamps, np.array([900, 1050, 1100, 1250], dtype=np.int64)
+        )
+        np.testing.assert_array_equal(
+            tl.sequences, np.array([900, 1050, 1100, 1250], dtype=np.int64)
+        )
+
+    def test_eager_exchange_timestamps_with_trades(self, tmp_path):
+        rows = [
+            (1000, "book_level", "bid", 100.0, 5.0),
+            (1000, "book_level", "ask", 101.0, 3.0),
+            (1100, "trade", "buy", 101.0, 1.0),
+            (1200, "book_update", "bid", 100.0, 7.0),
+            (1300, "trade", "sell", 100.0, 0.5),
+        ]
+        exch_ts = [900, 900, 1050, 1100, 1250]
+        seqs = [900, 900, 1050, 1100, 1250]
+        path = _make_parquet(tmp_path, rows, exchange_timestamps=exch_ts, sequences=seqs)
+        tl = TL()
+        tl.from_parquet(path, mode="eager")
+        np.testing.assert_array_equal(
+            tl.exchange_timestamps, np.array([900, 1050, 1100, 1250], dtype=np.int64)
+        )
+        np.testing.assert_array_equal(
+            tl.sequences, np.array([900, 1050, 1100, 1250], dtype=np.int64)
+        )
+
+    def test_no_exchange_timestamps_returns_empty(self, tmp_path):
+        rows = [
+            (1000, "book_level", "bid", 100.0, 5.0),
+            (1000, "book_level", "ask", 101.0, 3.0),
+        ]
+        path = _make_parquet(tmp_path, rows)
+        tl = TL()
+        tl.from_parquet(path, mode="lazy")
+        assert len(tl.exchange_timestamps) == 0
+        assert len(tl.sequences) == 0
+
+    def test_lobts_exchange_timestamps(self, tmp_path):
+        rows = [
+            (1000, "book_level", "bid", 100.0, 5.0),
+            (1000, "book_level", "ask", 101.0, 3.0),
+            (1100, "book_update", "bid", 100.0, 8.0),
+        ]
+        exch_ts = [900, 900, 1000]
+        seqs = [900, 900, 1000]
+        path = _make_parquet(tmp_path, rows, exchange_timestamps=exch_ts, sequences=seqs)
+        tl = TL()
+        tl.from_parquet(path, mode="lazy")
+        np.testing.assert_array_equal(
+            tl.lob.exchange_timestamps, np.array([900, 1000], dtype=np.int64)
+        )
+        np.testing.assert_array_equal(tl.lob.sequences, np.array([900, 1000], dtype=np.int64))
+
+    def test_exchange_timestamps_not_unique(self, tmp_path):
+        rows = [
+            (1000, "book_level", "bid", 100.0, 5.0),
+            (1000, "book_level", "ask", 101.0, 3.0),
+            (1100, "book_update", "bid", 100.0, 8.0),
+            (1200, "trade", "buy", 101.0, 1.0),
+        ]
+        exch_ts = [900, 900, 900, 900]
+        seqs = [10, 10, 20, 30]
+        path = _make_parquet(tmp_path, rows, exchange_timestamps=exch_ts, sequences=seqs)
+        tl = TL()
+        tl.from_parquet(path, mode="lazy")
+        np.testing.assert_array_equal(
+            tl.exchange_timestamps, np.array([900, 900, 900], dtype=np.int64)
+        )
+        np.testing.assert_array_equal(tl.sequences, np.array([10, 20, 30], dtype=np.int64))

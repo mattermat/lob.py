@@ -89,6 +89,25 @@
   - `bucket_size=None`: computed once as `total_volume / 50` and reused across all windows
   - values near 0 indicate balanced order flow; values near 1 indicate strong directional (potentially informed) flow
 
+### Trade activity
+
+**Frequency** (trades per second, scaled by `timestamp_unit`):
+- `tl.trade_frequency`: all trades per second
+- `tl.ask_trade_frequency`: buy-aggressor trades per second — trades where `side='b'` (buyer hits the ask)
+- `tl.bid_trade_frequency`: sell-aggressor trades per second — trades where `side='s'` (seller hits the bid)
+
+**Volume imbalance**:
+- `tl.trade_volume_imbalance`: `(buy_vol − sell_vol) / (buy_vol + sell_vol)`, in `[−1, +1]`
+  - `+1`: all volume was buy-aggressor; `−1`: all volume was sell-aggressor
+  - Returns `0.0` if there are no trades
+
+**Order book activity** (on the underlying `LOBts` via `tl.lob`):
+- `tl.lob.order_arrival_volume`, `tl.lob.order_cancel_volume`: total quantity added/removed
+- `tl.lob.order_arrival_frequency`, `tl.lob.order_cancel_frequency`: events per second
+- `tl.lob.bid_order_arrival_frequency`, `tl.lob.ask_order_arrival_frequency`: per-side arrivals/sec
+- `tl.lob.bid_order_cancel_frequency`, `tl.lob.ask_order_cancel_frequency`: per-side cancels/sec
+- `tl.lob.order_flow_imbalance`: `pd.Series` of `OFI(t) = (bid_arr_vol − bid_can_vol) − (ask_arr_vol − ask_can_vol)` per LOB transition — see [LOBts docs](lobts.md) for full semantics
+
 ### Guéant intensity function — `tl.gueant`
 Models trade arrival intensity as `λ(δ) = A · exp(−k · δ)`, where `δ` is the distance in ticks from best bid/ask.
 

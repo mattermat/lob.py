@@ -1,10 +1,11 @@
 # `LOBts` API (Time Series LOB)
 
 ### Initialization
-`LOBts(name=None, tick_size=1, mode='lazy')`
+`LOBts(name=None, tick_size=1, mode='lazy', timestamp_unit='ns')`
 - `name`: Optional identifier for the time series (auto-generated if `None`)
 - `tick_size`: Minimum price increment (default: `1`)
 - `mode`: Storage mode — `'lazy'` (default), `'eager'`, or `'latest'`
+- `timestamp_unit`: Unit of all timestamps — `'s'`, `'ms'`, `'us'`, or `'ns'` (default: `'ns'`). Used to compute per-second rates in frequency properties.
 
 ### Storage modes
 
@@ -105,16 +106,31 @@ Properties returning pandas Series indexed by timestamp:
 **Lazy mode**: these are computed via a single C forward pass (`lobts_seq_extract_best`) — O(N + D).
 **Eager/latest mode**: iterates stored LOB objects.
 
-### Time-Based Statistics
-- `lobts.arrival_frequency`: total order arrivals (L2 quantity-based)
-  - Counts quantity added to the order book across all transitions
-  - Includes: new levels and quantity increases at existing levels
+### Order Book Activity
 
-- `lobts.cancel_frequency`: total order cancellations (L2 quantity-based)
-  - Counts quantity removed from the order book across all transitions
-  - Includes: full cancellations (level → 0) and partial cancellations (quantity decreases)
+**Volume** (total quantity moved):
+- `lobts.order_arrival_volume`: total quantity added to the book across all LOB transitions
+  - Counts new price levels (full quantity) and quantity increases at existing levels (delta only)
+- `lobts.order_cancel_volume`: total quantity removed from the book across all LOB transitions
+  - Counts full cancellations (level → 0) and partial size decreases
+- `lobts.update_volume()`: `order_arrival_volume + order_cancel_volume`
 
-- `lobts.update_frequency()`: total updates (arrivals + cancellations)
+**Frequency** (events per second, scaled by `timestamp_unit`):
+- `lobts.order_arrival_frequency`: arrival events per second (both sides)
+- `lobts.order_cancel_frequency`: cancel events per second (both sides)
+- `lobts.bid_order_arrival_frequency`: bid-side arrival events per second
+- `lobts.ask_order_arrival_frequency`: ask-side arrival events per second
+- `lobts.bid_order_cancel_frequency`: bid-side cancel events per second
+- `lobts.ask_order_cancel_frequency`: ask-side cancel events per second
+
+Each event is one price level that appeared, increased, disappeared, or decreased in quantity.
+
+**Order flow imbalance**:
+- `lobts.order_flow_imbalance`: `pd.Series` of OFI values indexed by transition timestamp
+  - `OFI(t) = (bid_arr_vol − bid_can_vol) − (ask_arr_vol − ask_can_vol)`
+  - Positive: bid side building faster than ask side (bullish pressure)
+  - Negative: ask side building faster (bearish pressure)
+  - One value per LOB transition (length = number of timestamps − 1)
 
 ### Utility Methods
 - `lobts.diff(other)`: calculate differences between two `LOBts`
@@ -133,22 +149,22 @@ Properties returning pandas Series indexed by timestamp:
 - `lobts.to_parquet(path, start_ts=None, end_ts=None)`: export to Parquet
 
 ### L2 Order Book Semantics
-`LOBts` uses L2 (level 2) order book semantics for frequency calculations:
 
-**Arrival Frequency**: counts quantity added to the book
-- New level arrival: full quantity at new price level
-- Quantity increase: difference when existing level grows (X → Y, where Y > X)
+All activity metrics use L2 (price-level) semantics. Individual order IDs are not tracked.
 
-**Cancel Frequency**: counts quantity removed from the book
-- Full cancellation: complete quantity at removed level (X → 0)
-- Partial cancellation: difference when existing level shrinks (X → Y, where Y < X)
+**Arrival volume / events**: quantity added and price levels that grew
+- New level: full quantity counts as arrival volume; +1 arrival event
+- Quantity increase (X → Y, Y > X): delta `Y − X` counts as arrival volume; +1 arrival event
+
+**Cancel volume / events**: quantity removed and price levels that shrank
+- Full cancellation (X → 0 or level disappears): full `X` counts as cancel volume; +1 cancel event
+- Partial cancellation (X → Y, Y < X): delta `X − Y` counts as cancel volume; +1 cancel event
 
 Example:
 ```
 t=1000:  bid@100.00: 10
-t=1100:  bid@100.00: 7   (partial cancel: -3)
-t=1200:  bid@100.00: 15  (quantity increase: +8)
+t=1100:  bid@100.00: 7   → cancel_volume += 3,  cancel_event += 1
+t=1200:  bid@100.00: 15  → arrival_volume += 8, arrival_event += 1
 ```
-- Arrival from t=1000→1100: 0 (no increases)
-- Cancel from t=1000→1100: 3 (10→7)
-- Arrival from t=1100→1200: 8 (7→15)
+
+All activity properties are computed via a single `_iter_transitions()` forward pass backed by `_iter_seq_states()` (C-accelerated in lazy mode), so calling multiple properties is O(N) per call.
