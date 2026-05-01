@@ -1186,4 +1186,128 @@ static void trades_append_bulk(Trades *tr,
         trades_append(tr, ts[i], (int)sides[i], prices[i], volumes[i]);
 }
 
+/* ================================================================== */
+/* Full consistency checker — single-pass book replay                 */
+/* ================================================================== */
+
+#define FULL_CHECK_MAX_LEVELS 2048
+
+/*
+ * Replay a flat parquet event stream through a single mutable LobBook
+ * and call lob_check() after every timestamp that contains LOB events.
+ *
+ * Input arrays (all length n_rows, sorted by timestamp ascending):
+ *   timestamps        – int64
+ *   event_types       – 0=book_level, 1=book_update, 2=trade (ignored)
+ *   sides             – 0=bid, 1=ask
+ *   prices, quantities
+ *
+ * Outputs (caller pre-allocates n_rows elements for each):
+ *   out_failed_ts     – timestamps where lob_check() returned 0
+ *   out_failed_bid    – best bid  at failure (NAN if bid side empty)
+ *   out_failed_ask    – best ask  at failure (NAN if ask side empty)
+ *   out_n_failed      – number of failures written
+ *
+ * The caller guarantees that within each timestamp, events are ordered
+ * book_level → book_update → trade (enforced by structural validation).
+ */
+static void lobpy_validate_full(
+    const long long *timestamps,
+    const uint8_t   *event_types,
+    const uint8_t   *sides,
+    const double    *prices,
+    const double    *quantities,
+    int              n_rows,
+    long long       *out_failed_ts,
+    double          *out_failed_bid,
+    double          *out_failed_ask,
+    int             *out_n_failed
+) {
+    int n_failed = 0;
+    if (n_rows == 0) { *out_n_failed = 0; return; }
+
+    /* Single mutable book — never destroyed, reused for entire scan */
+    LobBook *lob = lob_create("__validate", 0.01, 0);
+    if (!lob) { *out_n_failed = -1; return; }
+
+    /* Per-timestamp book_level buffers (fixed max to avoid malloc) */
+    double bid_p[FULL_CHECK_MAX_LEVELS], bid_q[FULL_CHECK_MAX_LEVELS];
+    double ask_p[FULL_CHECK_MAX_LEVELS], ask_q[FULL_CHECK_MAX_LEVELS];
+    int    n_bid = 0, n_ask = 0;
+    int    has_book_level = 0, has_book_update = 0;
+    long long current_ts = timestamps[0];
+
+    for (int i = 0; i < n_rows; i++) {
+        long long ts = timestamps[i];
+
+        /* ---- timestamp boundary: finalise previous timestamp ---- */
+        if (ts != current_ts) {
+            if (has_book_level) {
+                lob_set_snapshot(lob, 0,
+                    bid_p, bid_q, n_bid,
+                    ask_p, ask_q, n_ask);
+            }
+            if ((has_book_level || has_book_update) && !lob_check(lob)
+                && n_failed < n_rows) {
+                out_failed_ts [n_failed] = current_ts;
+                out_failed_bid[n_failed] = lob->bids.len > 0
+                    ? lob->bids.data[0] : NAN;
+                out_failed_ask[n_failed] = lob->asks.len > 0
+                    ? lob->asks.data[0] : NAN;
+                n_failed++;
+            }
+            current_ts = ts;
+            n_bid = n_ask = 0;
+            has_book_level = has_book_update = 0;
+        }
+
+        /* ---- process event ---- */
+        uint8_t et = event_types[i];
+
+        if (et == 0) {  /* book_level */
+            double price = prices[i], qty = quantities[i];
+            if (sides[i] == 0 && n_bid < FULL_CHECK_MAX_LEVELS) {
+                bid_p[n_bid] = price;
+                bid_q[n_bid] = qty;
+                n_bid++;
+            } else if (sides[i] == 1 && n_ask < FULL_CHECK_MAX_LEVELS) {
+                ask_p[n_ask] = price;
+                ask_q[n_ask] = qty;
+                n_ask++;
+            }
+            has_book_level = 1;
+        } else if (et == 1) {  /* book_update */
+            /* Apply any pending book_level snapshot first */
+            if (has_book_level) {
+                lob_set_snapshot(lob, 0,
+                    bid_p, bid_q, n_bid,
+                    ask_p, ask_q, n_ask);
+                n_bid = n_ask = 0;
+                has_book_level = 0;
+            }
+            side_update(sides[i] == 0 ? &lob->bids : &lob->asks,
+                        prices[i], quantities[i]);
+            has_book_update = 1;
+        }
+        /* et == 2 (trade) — ignored */
+    }
+
+    /* ---- finalise last timestamp ---- */
+    if (has_book_level) {
+        lob_set_snapshot(lob, 0, bid_p, bid_q, n_bid, ask_p, ask_q, n_ask);
+    }
+    if ((has_book_level || has_book_update) && !lob_check(lob)
+        && n_failed < n_rows) {
+        out_failed_ts [n_failed] = current_ts;
+        out_failed_bid[n_failed] = lob->bids.len > 0
+            ? lob->bids.data[0] : NAN;
+        out_failed_ask[n_failed] = lob->asks.len > 0
+            ? lob->asks.data[0] : NAN;
+        n_failed++;
+    }
+
+    lob_destroy(lob);
+    *out_n_failed = n_failed;
+}
+
 #endif /* LOB_CORE_H */

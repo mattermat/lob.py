@@ -149,6 +149,20 @@ ffibuilder.cdef("""
     void trades_append_bulk(Trades *tr,
                              const long long *ts, const uint8_t *sides,
                              const double *prices, const double *volumes, int n);
+
+    /* ---- Full consistency checker ---- */
+    void lobpy_validate_full(
+        const long long *timestamps,
+        const uint8_t   *event_types,
+        const uint8_t   *sides,
+        const double    *prices,
+        const double    *quantities,
+        int              n_rows,
+        long long       *out_failed_ts,
+        double          *out_failed_bid,
+        double          *out_failed_ask,
+        int             *out_n_failed
+    );
 """)
 
 here = os.path.dirname(os.path.abspath(__file__))

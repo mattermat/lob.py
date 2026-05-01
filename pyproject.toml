@@ -37,6 +37,9 @@ export = [
     "openpyxl>=3.0.0",
 ]
 
+[project.scripts]
+lobpy = "lobpy.cli:main"
+
 [project.urls]
 Homepage = "https://github.com/mattermat/lob.py"
 "Bug Reports" = "https://github.com/mattermat/lob.py/issues"
