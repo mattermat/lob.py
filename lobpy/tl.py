@@ -421,6 +421,161 @@ class TL:
             return 0.0
         return (buy_vol - sell_vol) / total
 
+    def kyle_lambda(self, interval=None, window_size=None):
+        """
+        Estimate Kyle's lambda: price impact per unit of signed order flow.
+
+        Fits ΔP_mid = λ · Q_signed + α via OLS, where Q_signed is net signed
+        volume (buy volume − sell volume) and ΔP_mid is the midprice change over
+        the same interval. Zero-flow intervals are excluded from the regression.
+
+        Args:
+            interval:    None → one observation per consecutive LOB-update pair
+                             (t₁, t₂): Q_signed = trades in (t₁, t₂],
+                             ΔP_mid = mid(t₂) − mid(t₁).
+                         N   → non-overlapping fixed-width buckets [t, t+N):
+                             Q_signed = trades in the bucket,
+                             ΔP_mid = mid(t+N) − mid(t).
+                             N is in the same units as timestamps.
+            window_size: None → scalar λ over all observations (float).
+                         W   → rolling λ at each observation end timestamp;
+                             returns pd.Series indexed by end timestamps.
+                             W is in the same units as timestamps.
+
+        Returns:
+            float when window_size is None.
+            pd.Series indexed by observation end timestamps when window_size is given.
+            nan / empty Series if fewer than 2 non-zero-flow observations exist.
+        """
+        lob_ts_list = self._lobts.timestamps
+        if len(lob_ts_list) < 2:
+            return float("nan") if window_size is None else pd.Series(dtype=float)
+
+        lob_ts = np.array(lob_ts_list, dtype=np.int64)
+        mid_prices = np.array(
+            [self._lobts[ts].midprice for ts in lob_ts_list], dtype=np.float64
+        )
+
+        trades_sorted = sorted(self.trades, key=lambda t: t.timestamp)
+        if not trades_sorted:
+            return float("nan") if window_size is None else pd.Series(dtype=float)
+
+        trade_ts = np.array([t.timestamp for t in trades_sorted], dtype=np.int64)
+        trade_sv = np.array(
+            [t.volume if t.side == "b" else -t.volume for t in trades_sorted],
+            dtype=np.float64,
+        )
+
+        def _mid_at(ts):
+            idx = np.searchsorted(lob_ts, ts, side="right") - 1
+            return float("nan") if idx < 0 else float(mid_prices[idx])
+
+        def _sum_sv(lo, hi, lo_incl):
+            # (lo, hi] when lo_incl=False;  [lo, hi) when lo_incl=True
+            side_lo = "left" if lo_incl else "right"
+            side_hi = "left" if lo_incl else "right"
+            a = np.searchsorted(trade_ts, lo, side=side_lo)
+            b = np.searchsorted(trade_ts, hi, side=side_hi)
+            return float(np.sum(trade_sv[a:b])) if a < b else 0.0
+
+        def _ols_slope(qs, dps):
+            if len(qs) < 2:
+                return float("nan")
+            X = np.column_stack([qs, np.ones(len(qs))])
+            try:
+                coefs, _, _, _ = np.linalg.lstsq(X, dps, rcond=None)
+                return float(coefs[0])
+            except Exception:
+                return float("nan")
+
+        obs_q: list = []
+        obs_dp: list = []
+        obs_ts: list = []
+
+        if interval is None:
+            for i in range(len(lob_ts) - 1):
+                t1, t2 = int(lob_ts[i]), int(lob_ts[i + 1])
+                m1, m2 = float(mid_prices[i]), float(mid_prices[i + 1])
+                if np.isnan(m1) or np.isnan(m2):
+                    continue
+                q = _sum_sv(t1, t2, lo_incl=False)
+                if q == 0.0:
+                    continue
+                obs_q.append(q)
+                obs_dp.append(m2 - m1)
+                obs_ts.append(t2)
+        else:
+            iv = int(interval)
+            t = int(lob_ts[0])
+            t_end = int(lob_ts[-1])
+            while t < t_end:
+                t_next = t + iv
+                m1, m2 = _mid_at(t), _mid_at(t_next)
+                if not (np.isnan(m1) or np.isnan(m2)):
+                    q = _sum_sv(t, t_next, lo_incl=True)
+                    if q != 0.0:
+                        obs_q.append(q)
+                        obs_dp.append(m2 - m1)
+                        obs_ts.append(t_next)
+                t = t_next
+
+        obs_q_arr = np.asarray(obs_q, dtype=np.float64)
+        obs_dp_arr = np.asarray(obs_dp, dtype=np.float64)
+        obs_ts_arr = np.asarray(obs_ts, dtype=np.int64)
+
+        if window_size is None:
+            return _ols_slope(obs_q_arr, obs_dp_arr)
+
+        if len(obs_q_arr) == 0:
+            return pd.Series(dtype=float)
+
+        n = len(obs_q_arr)
+        lambdas = np.full(n, float("nan"))
+        left = 0
+        for right in range(n):
+            while obs_ts_arr[left] < obs_ts_arr[right] - window_size:
+                left += 1
+            lambdas[right] = _ols_slope(
+                obs_q_arr[left : right + 1], obs_dp_arr[left : right + 1]
+            )
+
+        return pd.Series(lambdas, index=obs_ts_arr)
+
+    def fill_rate(self, holding_time, side="a", buckets=None):
+        """
+        Fill probability for a passive limit order at each tick distance δ.
+
+        Uses the empirical Gueant trade arrival rate λ̂(δ) = N(δ) / T(δ) and
+        applies the Poisson fill-probability formula:
+
+            P(fill within holding_time | δ) = 1 − exp(−λ̂(δ) · holding_time)
+
+        λ̂(δ) is the rate of trades arriving at distance δ from the best quote,
+        estimated directly from the LOB and trade history (no model fitting).
+        holding_time is in the same units as all timestamps in this TL.
+
+        Args:
+            holding_time: order resting duration before cancellation (timestamp units).
+            side:         'a' (ask side — filled by buy-aggressor trades) or
+                          'b' (bid side — filled by sell-aggressor trades).
+            buckets:      optional list of δ thresholds to aggregate integer-δ bins;
+                          same semantics as tl.gueant.buckets().
+
+        Returns:
+            pd.DataFrame with columns:
+                delta     – tick distance from best quote (int or float threshold)
+                N         – number of trades observed at this δ
+                T         – total book-time (timestamp units) the book exposed liquidity at δ
+                lambda    – empirical arrival rate N/T; nan if no exposure or no trades
+                fill_rate – P(fill within holding_time); nan where lambda is nan
+        """
+        df = self.gueant.buckets(side, buckets).copy()
+        ht = float(holding_time)
+        df["fill_rate"] = df["lambda"].apply(
+            lambda lam: float("nan") if np.isnan(lam) else 1.0 - np.exp(-lam * ht)
+        )
+        return df
+
     def hawkes(self, side=None, window_size=None):
         """
         Fit a univariate exponential Hawkes process to trade timestamps.

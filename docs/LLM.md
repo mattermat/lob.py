@@ -333,9 +333,44 @@ tl.vpin(window_size=None, bucket_size=None)
 
 > `VPIN = Σ|V_buy[i] − V_sell[i]| / (n × bucket_size)`. Near 0 = balanced flow; near 1 = directional/informed.
 
+### Analytics — Fill Rate
+
+```python
+tl.fill_rate(holding_time, side='a', buckets=None)
+# → pd.DataFrame [delta, N, T, lambda, fill_rate]
+```
+
+`P(fill | δ, T) = 1 − exp(−λ̂(δ) · holding_time)` using the empirical rate λ̂(δ) = N(δ)/T(δ) (no model fitting). `holding_time` is in the same timestamp units as the TL.
+
+| Param | Description |
+|---|---|
+| `holding_time` | resting duration before cancellation |
+| `side` | `'a'` (ask, filled by buy-aggressors) / `'b'` (bid, filled by sell-aggressors) |
+| `buckets` | optional δ threshold list; same as `tl.gueant.buckets()` |
+
+`fill_rate` column is nan where `lambda` is nan. Assumes Poisson arrivals (trade clustering means slightly underestimated for short windows, overestimated for long ones).
+
+### Analytics — Kyle's Lambda
+
+Price impact coefficient `λ` from `ΔP_mid = λ · Q_signed + α` (OLS). `Q_signed = buy_volume − sell_volume`; zero-flow intervals excluded.
+
+```python
+tl.kyle_lambda(interval=None, window_size=None)
+# → float                   (window_size=None)
+# → pd.Series (end_ts idx)  (window_size=W)
+```
+
+| Param | Description |
+|---|---|
+| `interval=None` | One obs per consecutive LOB-update pair `(t₁, t₂)`: Q=trades in `(t₁,t₂]`, ΔP=mid(t₂)−mid(t₁) |
+| `interval=N` | Non-overlapping fixed buckets `[t, t+N)`: Q=trades in bucket, ΔP=mid(t+N)−mid(t) |
+| `window_size=None` | Scalar over all obs; `W` = rolling Series indexed by obs end timestamps |
+
+Returns `nan` / empty Series when fewer than 2 non-zero-flow observations are available. Higher `λ` = thinner liquidity or stronger adverse selection.
+
 ### Analytics — Hawkes Process
 
-Models self-exciting trade arrival: `λ(t) = μ + Σᵢ α · exp(−β · (t − tᵢ))`.
+Models **trade arrival** self-excitation: `λ(t) = μ + Σᵢ α · exp(−β · (t − tᵢ))`. Fitted on `tl.trades` only — order arrivals/cancellations require a separate model.
 
 ```python
 tl.hawkes(side=None, window_size=None)

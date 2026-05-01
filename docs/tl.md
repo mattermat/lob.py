@@ -108,9 +108,67 @@
 - `tl.lob.bid_order_cancel_frequency`, `tl.lob.ask_order_cancel_frequency`: per-side cancels/sec
 - `tl.lob.order_flow_imbalance`: `pd.Series` of `OFI(t) = (bid_arr_vol − bid_can_vol) − (ask_arr_vol − ask_can_vol)` per LOB transition — see [LOBts docs](lobts.md) for full semantics
 
+### Kyle's lambda — `tl.kyle_lambda()`
+
+Price impact coefficient from the linear model `ΔP_mid = λ · Q_signed + α`, where `Q_signed = buy_volume − sell_volume` and `ΔP_mid` is the change in mid-price over the same interval. Fitted via OLS; zero-flow intervals are excluded.
+
+```python
+tl.kyle_lambda(interval=None, window_size=None)
+```
+
+| Param | Description |
+|---|---|
+| `interval` | `None` → one observation per consecutive LOB-update pair `(t₁, t₂)`: `Q_signed` = trades in `(t₁, t₂]`, `ΔP_mid = mid(t₂) − mid(t₁)` |
+| | `N` → non-overlapping fixed-width time buckets `[t, t+N)`: `Q_signed` = trades in bucket, `ΔP_mid = mid(t+N) − mid(t)`. `N` in same timestamp units as the TL |
+| `window_size` | `None` → scalar `λ` over all observations; `W` → rolling `pd.Series` indexed by observation end timestamps |
+
+**Returns**:
+- `float` when `window_size=None`; `nan` if fewer than 2 non-zero-flow observations
+- `pd.Series` indexed by observation end timestamps when `window_size=W`; empty Series if no observations
+
+**Interpretation**: a higher `λ` means a larger price move per unit of net signed volume — indicating thinner liquidity or stronger adverse selection. `λ ≈ 0` indicates price-insensitive order flow (e.g. liquidity-motivated trades).
+
+### Fill rate — `tl.fill_rate()`
+
+Fill probability for a passive limit order at each tick distance δ, using the empirical trade arrival rate.
+
+```python
+tl.fill_rate(holding_time, side='a', buckets=None)
+```
+
+**Model**: trade arrivals at distance δ are modelled as a Poisson process with rate λ̂(δ). Given a resting order at δ for `holding_time` timestamp units:
+
+```
+P(fill) = 1 − exp(−λ̂(δ) · holding_time)
+```
+
+λ̂(δ) = N(δ) / T(δ) — the same empirical intensity table as `tl.gueant.buckets()`, no model fitting required.
+
+| Param | Description |
+|---|---|
+| `holding_time` | order resting duration (same timestamp units as the TL) |
+| `side` | `'a'` (ask side — filled by buy-aggressor trades) or `'b'` (bid side — filled by sell-aggressor trades) |
+| `buckets` | optional list of δ thresholds to aggregate integer-δ bins (same as `tl.gueant.buckets()`) |
+
+**Returns**: `pd.DataFrame` with columns:
+
+| Column | Description |
+|---|---|
+| `delta` | tick distance from best quote |
+| `N` | number of observed trades at this δ |
+| `T` | total book-time (timestamp units) the book exposed liquidity at δ |
+| `lambda` | empirical arrival rate N/T; nan if no exposure or no trades |
+| `fill_rate` | P(fill within `holding_time`); nan where lambda is nan |
+
+**Notes:**
+- Fill rate increases monotonically with `holding_time` (longer resting → higher fill probability).
+- Inner levels (δ=0, 1) typically have high λ̂ and thus high fill rates; outer levels are near 0.
+- The formula assumes Poisson arrivals. Trade clustering (Hawkes-like) means real fill probability is slightly higher for short holding times and slightly lower for long ones compared to this estimate.
+
 ### Hawkes process — `tl.hawkes()`
 
-Models trade arrival self-excitation: each trade increases the probability of subsequent trades, decaying exponentially.
+Models **trade arrival** self-excitation: each execution increases the probability of subsequent trades, decaying exponentially. Fitted exclusively on trade timestamps (`tl.trades`). Order arrivals and cancellations (LOB-level events) are not modelled here.
+
 
 ```
 λ(t) = μ + Σᵢ α · exp(−β · (t − tᵢ))
