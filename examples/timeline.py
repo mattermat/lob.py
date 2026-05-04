@@ -9,8 +9,6 @@ of statistics that mix order book and execution data, such as:
 - Volume-weighted statistics
 """
 
-import numpy as np  # For intensity function examples
-
 from lobpy import TL
 
 # Create a TimeLine with configuration
@@ -146,7 +144,7 @@ print(f"Total events: {len(tl)}, in {len(tl.timestamps)} timestamps")
 print(f"Timestamps: {tl.timestamps[:5]}... (showing first 5)")
 print()
 
-#exit()
+# exit()
 # print(tl.to_np())
 print(tl.to_pd())
 

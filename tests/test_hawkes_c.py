@@ -26,18 +26,18 @@ def _nll(mu, alpha, beta, ts):
     return _negloglik([mu, alpha, beta], ts, dt)
 
 
-def simulate_hawkes(mu, alpha, beta, T, seed=0):
+def simulate_hawkes(mu, alpha, beta, t_max, seed=0):
     """Ogata thinning simulation of a univariate exponential Hawkes process."""
     rng = np.random.default_rng(seed)
     events = []
     t = 0.0
     lam_bar = mu  # upper bound on intensity
 
-    while t < T:
+    while t < t_max:
         lam_bar = max(lam_bar, mu)
         dt = rng.exponential(1.0 / lam_bar)
         t += dt
-        if t > T:
+        if t > t_max:
             break
         # actual intensity at t
         lam_t = mu + alpha * sum(np.exp(-beta * (t - s)) for s in events)
@@ -54,20 +54,20 @@ def simulate_hawkes(mu, alpha, beta, T, seed=0):
 # ---------------------------------------------------------------------------
 
 CASES = [
-    # (mu, alpha, beta, T, min_events, label)
-    (0.5,  0.3,  1.0,  200.0,  50,  "low_branching"),
-    (0.2,  0.5,  0.8,  500.0, 100,  "moderate_branching"),
-    (1.0,  0.1,  0.5, 1000.0, 200,  "high_rate_low_branching"),
-    (0.1,  0.6,  1.0, 2000.0, 200,  "high_branching"),
-    (2.0,  0.8,  3.0,  100.0,  50,  "fast_decay"),
+    # (mu, alpha, beta, t_max, min_events, label)
+    (0.5, 0.3, 1.0, 200.0, 50, "low_branching"),
+    (0.2, 0.5, 0.8, 500.0, 100, "moderate_branching"),
+    (1.0, 0.1, 0.5, 1000.0, 200, "high_rate_low_branching"),
+    (0.1, 0.6, 1.0, 2000.0, 200, "high_branching"),
+    (2.0, 0.8, 3.0, 100.0, 50, "fast_decay"),
 ]
 
 
 @pytest.mark.skipif(not _HAWKES_C, reason="C extension not available")
-@pytest.mark.parametrize("mu,alpha,beta,T,min_n,label", CASES)
-def test_nll_matches_python(mu, alpha, beta, T, min_n, label):
+@pytest.mark.parametrize("mu,alpha,beta,t_max,min_n,label", CASES)
+def test_nll_matches_python(mu, alpha, beta, t_max, min_n, label):
     """C and Python fits reach NLL within 0.01% of each other."""
-    ts = simulate_hawkes(mu, alpha, beta, T, seed=42)
+    ts = simulate_hawkes(mu, alpha, beta, t_max, seed=42)
     if len(ts) < min_n:
         pytest.skip(f"simulation too short ({len(ts)} events)")
 
@@ -75,27 +75,26 @@ def test_nll_matches_python(mu, alpha, beta, T, min_n, label):
     mu_py, alpha_py, beta_py = _fit_py(ts)
 
     # Both must succeed
-    assert np.isfinite(mu_c) and np.isfinite(alpha_c) and np.isfinite(beta_c), \
-        f"C fit failed on {label}"
-    assert np.isfinite(mu_py) and np.isfinite(alpha_py) and np.isfinite(beta_py), \
-        f"Python fit failed on {label}"
+    assert (
+        np.isfinite(mu_c) and np.isfinite(alpha_c) and np.isfinite(beta_c)
+    ), f"C fit failed on {label}"
+    assert (
+        np.isfinite(mu_py) and np.isfinite(alpha_py) and np.isfinite(beta_py)
+    ), f"Python fit failed on {label}"
 
-    nll_c  = _nll(mu_c,  alpha_c,  beta_c,  ts)
+    nll_c = _nll(mu_c, alpha_c, beta_c, ts)
     nll_py = _nll(mu_py, alpha_py, beta_py, ts)
 
     # NLL relative difference < 0.01%
     rel = abs(nll_c - nll_py) / (abs(nll_py) + 1e-12)
-    assert rel < 1e-4, (
-        f"{label}: NLL divergence {rel:.2e} "
-        f"(C={nll_c:.6f}, py={nll_py:.6f})"
-    )
+    assert rel < 1e-4, f"{label}: NLL divergence {rel:.2e} " f"(C={nll_c:.6f}, py={nll_py:.6f})"
 
 
 @pytest.mark.skipif(not _HAWKES_C, reason="C extension not available")
-@pytest.mark.parametrize("mu,alpha,beta,T,min_n,label", CASES)
-def test_params_close_to_python(mu, alpha, beta, T, min_n, label):
+@pytest.mark.parametrize("mu,alpha,beta,t_max,min_n,label", CASES)
+def test_params_close_to_python(mu, alpha, beta, t_max, min_n, label):
     """C parameters agree with Python within 1% (relative)."""
-    ts = simulate_hawkes(mu, alpha, beta, T, seed=42)
+    ts = simulate_hawkes(mu, alpha, beta, t_max, seed=42)
     if len(ts) < min_n:
         pytest.skip(f"simulation too short ({len(ts)} events)")
 
@@ -105,7 +104,11 @@ def test_params_close_to_python(mu, alpha, beta, T, min_n, label):
     if not (np.isfinite(mu_c) and np.isfinite(mu_py)):
         pytest.skip("one or both fits returned nan")
 
-    for name, vc, vpy in [("mu", mu_c, mu_py), ("alpha", alpha_c, alpha_py), ("beta", beta_c, beta_py)]:
+    for name, vc, vpy in [
+        ("mu", mu_c, mu_py),
+        ("alpha", alpha_c, alpha_py),
+        ("beta", beta_c, beta_py),
+    ]:
         rel = abs(vc - vpy) / (abs(vpy) + 1e-12)
         assert rel < 0.01, f"{label}/{name}: C={vc:.6f} py={vpy:.6f} rel={rel:.2e}"
 
@@ -115,17 +118,15 @@ def test_branching_ratio_below_one():
     """C fit must always return branching ratio < 1 (stationarity)."""
     rng = np.random.default_rng(7)
     for _ in range(10):
-        mu    = rng.uniform(0.1, 2.0)
-        beta  = rng.uniform(0.5, 5.0)
+        mu = rng.uniform(0.1, 2.0)
+        beta = rng.uniform(0.5, 5.0)
         alpha = rng.uniform(0.05, 0.95) * beta
-        ts = simulate_hawkes(mu, alpha, beta, T=500.0, seed=int(rng.integers(1000)))
+        ts = simulate_hawkes(mu, alpha, beta, t_max=500.0, seed=int(rng.integers(1000)))
         if len(ts) < 10:
             continue
         mu_c, alpha_c, beta_c = _fit_c(ts)
         if np.isfinite(mu_c):
-            assert alpha_c < beta_c, (
-                f"branching ratio >= 1: alpha={alpha_c:.4f} beta={beta_c:.4f}"
-            )
+            assert alpha_c < beta_c, f"branching ratio >= 1: alpha={alpha_c:.4f} beta={beta_c:.4f}"
 
 
 @pytest.mark.skipif(not _HAWKES_C, reason="C extension not available")
@@ -141,7 +142,8 @@ def test_edge_fewer_than_3_events():
 def test_c_faster_than_python(benchmark_n=2000):
     """Smoke-test: C fit completes on a large window without hanging."""
     import time
-    ts = simulate_hawkes(0.5, 0.3, 1.0, T=5000.0, seed=99)
+
+    ts = simulate_hawkes(0.5, 0.3, 1.0, t_max=5000.0, seed=99)
     ts = ts[:benchmark_n] if len(ts) > benchmark_n else ts
     if len(ts) < 10:
         pytest.skip("not enough events")

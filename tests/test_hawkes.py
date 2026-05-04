@@ -6,11 +6,9 @@ import math
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from lobpy.hawkes import fit_hawkes
 from lobpy.tl import TL
-
 
 # ---------------------------------------------------------------------------
 # fit_hawkes — unit tests on known synthetic data

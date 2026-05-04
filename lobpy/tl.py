@@ -64,7 +64,12 @@ class TL:
         self.update_type = update_type
         self.timestamp_unit = timestamp_unit
         _lobts_mode = "latest" if lob_mode == "snapshot" else "lazy"
-        self._lobts = LOBts(name=name, tick_size=tick_size, mode=_lobts_mode, timestamp_unit=timestamp_unit)
+        self._lobts = LOBts(
+            name=name,
+            tick_size=tick_size,
+            mode=_lobts_mode,
+            timestamp_unit=timestamp_unit,
+        )
         self._ptr_trades = lib.trades_create()
         self._trades_cache = None  # invalidated on mutation, rebuilt lazily
         self._exchange_timestamps: np.ndarray = np.empty(0, dtype=np.int64)
@@ -452,9 +457,7 @@ class TL:
             return float("nan") if window_size is None else pd.Series(dtype=float)
 
         lob_ts = np.array(lob_ts_list, dtype=np.int64)
-        mid_prices = np.array(
-            [self._lobts[ts].midprice for ts in lob_ts_list], dtype=np.float64
-        )
+        mid_prices = np.array([self._lobts[ts].midprice for ts in lob_ts_list], dtype=np.float64)
 
         trades_sorted = sorted(self.trades, key=lambda t: t.timestamp)
         if not trades_sorted:
@@ -481,9 +484,9 @@ class TL:
         def _ols_slope(qs, dps):
             if len(qs) < 2:
                 return float("nan")
-            X = np.column_stack([qs, np.ones(len(qs))])
+            x_mat = np.column_stack([qs, np.ones(len(qs))])
             try:
-                coefs, _, _, _ = np.linalg.lstsq(X, dps, rcond=None)
+                coefs, _, _, _ = np.linalg.lstsq(x_mat, dps, rcond=None)
                 return float(coefs[0])
             except Exception:
                 return float("nan")
@@ -535,9 +538,7 @@ class TL:
         for right in range(n):
             while obs_ts_arr[left] < obs_ts_arr[right] - window_size:
                 left += 1
-            lambdas[right] = _ols_slope(
-                obs_q_arr[left : right + 1], obs_dp_arr[left : right + 1]
-            )
+            lambdas[right] = _ols_slope(obs_q_arr[left : right + 1], obs_dp_arr[left : right + 1])
 
         return pd.Series(lambdas, index=obs_ts_arr)
 
@@ -757,7 +758,12 @@ class TL:
         from .lobts import _LAZY_DELTA_DTYPE, LOBts
 
         _lobts_mode = "latest" if self.lob_mode == "snapshot" else "lazy"
-        lazy_lobts = LOBts(name=self.name, tick_size=self.tick_size, mode=_lobts_mode, timestamp_unit=self.timestamp_unit)
+        lazy_lobts = LOBts(
+            name=self.name,
+            tick_size=self.tick_size,
+            mode=_lobts_mode,
+            timestamp_unit=self.timestamp_unit,
+        )
 
         schema = pq.read_schema(path)
         base_cols = ["timestamp", "event_type", "side", "price", "quantity"]

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, Optional, cast
 
 import numpy as np
 
@@ -224,19 +224,22 @@ def _row_list(rows: Optional[Iterable[int]]) -> list[int]:
 
 def _sample_rows(mask: Any, *, max_rows: int) -> list[int]:
     values = np.asarray(mask, dtype=bool)
-    return np.flatnonzero(values)[:max_rows].astype(int).tolist()
+    return cast(
+        list[int],
+        np.flatnonzero(values)[:max_rows].astype(int).tolist(),
+    )
 
 
 def _type_matches(kind: str, arrow_type: Any, pa: Any) -> bool:
     types = pa.types
     if kind == "integer":
-        return types.is_integer(arrow_type)
+        return bool(types.is_integer(arrow_type))
     if kind == "string":
-        return types.is_string(arrow_type) or types.is_large_string(arrow_type)
+        return bool(types.is_string(arrow_type) or types.is_large_string(arrow_type))
     if kind == "numeric":
-        return types.is_integer(arrow_type) or types.is_floating(arrow_type)
+        return bool(types.is_integer(arrow_type) or types.is_floating(arrow_type))
     if kind == "floating":
-        return types.is_floating(arrow_type)
+        return bool(types.is_floating(arrow_type))
     if kind == "string_or_integer":
         return _type_matches("string", arrow_type, pa) or _type_matches("integer", arrow_type, pa)
     return False
@@ -442,13 +445,11 @@ def _check_lobpy_load(result: ParquetValidationResult, path: Path) -> None:
         result.add_error("LOBPY_LOAD_FAILED", f"TL.from_parquet(..., mode='lazy') failed: {exc}")
 
 
-def _check_lobpy_full(
-    result: ParquetValidationResult, path: Path, *, max_rows: int = 5
-) -> None:
+def _check_lobpy_full(result: ParquetValidationResult, path: Path, *, max_rows: int = 5) -> None:
     """Replay events in C and run lob.check() after each timestamp."""
     try:
-        import pyarrow.parquet as pq
         import numpy as np
+        import pyarrow.parquet as pq
 
         from lobpy._cext import ffi, lib
 
@@ -463,7 +464,9 @@ def _check_lobpy_full(
         # --- encode string columns to uint8 (event_type / side guaranteed valid by step 5) ---
 
         et = table.column("event_type").to_numpy()
-        event_types = np.where(et == "book_update", 1, np.where(et == "trade", 2, 0)).astype(np.uint8)
+        event_types = np.where(et == "book_update", 1, np.where(et == "trade", 2, 0)).astype(
+            np.uint8
+        )
 
         s = table.column("side").to_numpy()
         sides = np.where((s == "ask") | (s == "sell"), 1, 0).astype(np.uint8)
@@ -516,8 +519,7 @@ def _check_lobpy_full(
                 lines.append(f"  ... ({n_failed - max_rows} more omitted)")
             result.add_error(
                 "LOBPY_FULL_CHECK_FAILED",
-                f"LOB consistency check failed at {n_failed} timestamp(s):\n"
-                + "\n".join(lines),
+                f"LOB consistency check failed at {n_failed} timestamp(s):\n" + "\n".join(lines),
             )
     except Exception as exc:
         result.add_error(

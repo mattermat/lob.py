@@ -333,7 +333,12 @@ class LOBts:
             New LOBts with filtered data
         """
         if self._mode == "lazy":
-            result = LOBts(name=f"{self.name}_range", tick_size=self.tick_size, mode="lazy", timestamp_unit=self.timestamp_unit)
+            result = LOBts(
+                name=f"{self.name}_range",
+                tick_size=self.tick_size,
+                mode="lazy",
+                timestamp_unit=self.timestamp_unit,
+            )
 
             # Anchor: nearest checkpoint at or before start_ts
             if start_ts is not None and len(self._ckpt_ts) > 0:
@@ -1289,8 +1294,17 @@ class LOBts:
                     ask_can_cnt += 1
 
             prev_bid, prev_ask = curr_bid, curr_ask
-            yield (ts, bid_arr_vol, bid_can_vol, ask_arr_vol, ask_can_vol,
-                   bid_arr_cnt, bid_can_cnt, ask_arr_cnt, ask_can_cnt)
+            yield (
+                ts,
+                bid_arr_vol,
+                bid_can_vol,
+                ask_arr_vol,
+                ask_can_vol,
+                bid_arr_cnt,
+                bid_can_cnt,
+                ask_arr_cnt,
+                ask_can_cnt,
+            )
 
     @property
     def order_arrival_volume(self):

@@ -73,8 +73,13 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "validate":
         results = [
-            validate_parquet(path, strict=args.strict, load=args.load,
-                             full_check=args.full_check, max_rows=args.max_rows)
+            validate_parquet(
+                path,
+                strict=args.strict,
+                load=args.load,
+                full_check=args.full_check,
+                max_rows=args.max_rows,
+            )
             for path in args.paths
         ]
         if args.as_json:

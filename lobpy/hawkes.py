@@ -19,14 +19,15 @@ References: Hawkes (1971), Ozaki (1979).
 import numpy as np
 
 try:
-    from scipy.optimize import minimize as _scipy_minimize
+    from scipy.optimize import minimize as _scipy_minimize  # type: ignore[import-untyped]
 
     _SCIPY = True
 except ImportError:
     _SCIPY = False
 
 try:
-    from lobpy._cext import ffi as _ffi, lib as _lib
+    from lobpy._cext import ffi as _ffi
+    from lobpy._cext import lib as _lib
 
     _HAWKES_C = hasattr(_lib, "hawkes_mle_fit")
 except Exception:
@@ -44,20 +45,20 @@ def _negloglik(params, ts, dt):
         return np.inf
 
     n = len(ts)
-    T = ts[-1]
+    t_end = ts[-1]
 
-    R = np.empty(n, dtype=np.float64)
-    R[0] = 0.0
+    r = np.empty(n, dtype=np.float64)
+    r[0] = 0.0
     exp_bdt = np.exp(-beta * dt)
     for i in range(1, n):
-        R[i] = exp_bdt[i] * (1.0 + R[i - 1])
+        r[i] = exp_bdt[i] * (1.0 + r[i - 1])
 
-    lam = mu + alpha * R
+    lam = mu + alpha * r
     if np.any(lam <= 0.0):
         return np.inf
 
     log_lik = np.sum(np.log(lam))
-    integral = mu * T + (alpha / beta) * np.sum(1.0 - np.exp(-beta * (T - ts)))
+    integral = mu * t_end + (alpha / beta) * np.sum(1.0 - np.exp(-beta * (t_end - ts)))
     return -(log_lik - integral)
 
 
@@ -80,15 +81,15 @@ def _fit_py(ts):
     if n < 3:
         return float("nan"), float("nan"), float("nan")
 
-    T = ts[-1]
-    if T <= 0.0:
+    t_end = ts[-1]
+    if t_end <= 0.0:
         return float("nan"), float("nan"), float("nan")
 
     dt = np.empty(n, dtype=np.float64)
     dt[0] = 0.0
     dt[1:] = np.diff(ts)
 
-    rate = n / T
+    rate = n / t_end
     best_nll = np.inf
     best_x = None
 
@@ -105,7 +106,7 @@ def _fit_py(ts):
                 bounds=[(1e-10, None), (1e-10, None), (1e-10, None)],
                 options={"maxiter": 500, "ftol": 1e-12},
             )
-        except Exception:
+        except Exception:  # nosec B112
             continue
         if np.isfinite(res.fun) and res.fun < best_nll:
             best_nll = res.fun
@@ -140,9 +141,9 @@ def _fit_c(ts):
 
     ts_ptr = _ffi.cast("double *", ts_c.ctypes.data)
     dt_ptr = _ffi.cast("double *", dt_c.ctypes.data)
-    mu_p    = _ffi.new("double *")
+    mu_p = _ffi.new("double *")
     alpha_p = _ffi.new("double *")
-    beta_p  = _ffi.new("double *")
+    beta_p = _ffi.new("double *")
 
     ret = _lib.hawkes_mle_fit(ts_ptr, dt_ptr, n, mu_p, alpha_p, beta_p)
     if ret != 0:
