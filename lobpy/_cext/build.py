@@ -150,6 +150,13 @@ ffibuilder.cdef("""
                              const long long *ts, const uint8_t *sides,
                              const double *prices, const double *volumes, int n);
 
+    /* ---- Hawkes MLE ---- */
+    /* ts  : timestamps shifted to start at 0, length n
+       dt  : inter-arrival times (dt[0]=0, dt[i]=ts[i]-ts[i-1]), length n
+       Returns 0 on success, 1 on failure; outputs set to NaN on failure. */
+    int hawkes_mle_fit(const double *ts, const double *dt, int n,
+                       double *out_mu, double *out_alpha, double *out_beta);
+
     /* ---- Full consistency checker ---- */
     void lobpy_validate_full(
         const long long *timestamps,

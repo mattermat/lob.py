@@ -1310,4 +1310,242 @@ static void lobpy_validate_full(
     *out_n_failed = n_failed;
 }
 
+/* ================================================================== */
+/* Hawkes MLE — univariate exponential Hawkes (Ozaki 1979)            */
+/*                                                                      */
+/* Model:  λ(t) = μ + Σᵢ α·exp(−β·(t−tᵢ))                           */
+/* MLE via O(N) recursive log-likelihood + BFGS optimizer              */
+/* Parameters reparameterised as θ=log(μ,α,β) for unconstrained opt.  */
+/* Branching-ratio constraint (α<β) enforced softly inside NLL.        */
+/* ================================================================== */
+
+#define HAWKES_P    3       /* number of parameters */
+#define HAWKES_C1   1e-4    /* Armijo sufficient-decrease constant */
+#define HAWKES_ITER 500     /* max BFGS iterations per start */
+
+/* Negative log-likelihood + analytical gradient.
+   theta = [log μ, log α, log β].
+   grad may be NULL (skips gradient accumulation; NLL is still exact). */
+static double hawkes_nll_grad(
+    const double theta[HAWKES_P],
+    const double *ts, const double *dt, int n,
+    double grad[HAWKES_P])
+{
+    double mu    = exp(theta[0]);
+    double alpha = exp(theta[1]);
+    double beta  = exp(theta[2]);
+
+    /* soft stationarity: α/β must be < 1 */
+    if (alpha >= beta) {
+        if (grad) { grad[0] = 0.0; grad[1] = 1e9; grad[2] = -1e9; }
+        return 1e15;
+    }
+
+    double T = ts[n - 1];
+
+    /* Ozaki recurrence: R[i] = Σⱼ<ᵢ exp(−β·(tᵢ−tⱼ)) */
+    double R = 0.0, dR = 0.0;   /* dR = ∂R/∂β (pre chain-rule) */
+    double sum_log = 0.0;
+    double d_mu = 0.0, d_alpha = 0.0, d_beta = 0.0;
+
+    for (int i = 0; i < n; i++) {
+        if (i > 0) {
+            double e = exp(-beta * dt[i]);
+            if (grad) dR = e * (dR - dt[i] * (1.0 + R));
+            R = e * (1.0 + R);
+        }
+        double lam = mu + alpha * R;
+        if (lam <= 0.0) return 1e15;
+        sum_log += log(lam);
+        if (grad) {
+            double inv  = 1.0 / lam;
+            d_mu    += inv;
+            d_alpha += R * inv;
+            d_beta  += alpha * dR * inv;
+        }
+    }
+
+    /* integral: μT + (α/β)·Σ(1 − exp(−β(T−tᵢ))) */
+    double s_e = 0.0, s_ed = 0.0;
+    for (int i = 0; i < n; i++) {
+        double e = exp(-beta * (T - ts[i]));
+        s_e += 1.0 - e;
+        if (grad) s_ed += (T - ts[i]) * e;
+    }
+    double ab  = alpha / beta;
+    double nll = -(sum_log - (mu * T + ab * s_e));
+
+    if (grad) {
+        double g_mu    = -(d_mu    - T);
+        double g_alpha = -(d_alpha - s_e / beta);
+        double g_beta  = -(d_beta  + (ab / beta) * s_e - ab * s_ed);
+        /* chain rule: ∂nll/∂θᵢ = ∂nll/∂paramᵢ × paramᵢ */
+        grad[0] = g_mu    * mu;
+        grad[1] = g_alpha * alpha;
+        grad[2] = g_beta  * beta;
+    }
+    return nll;
+}
+
+/* Backtracking line search (Armijo condition).
+   Returns f at accepted step; fills xn with new point.
+   Returns f unchanged and xn=x when no progress is found. */
+static double hawkes_line_search(
+    const double x[HAWKES_P], const double d[HAWKES_P],
+    double f, double dg,
+    const double *ts, const double *dt, int n,
+    double xn[HAWKES_P])
+{
+    double alpha = 1.0;
+    for (int ls = 0; ls < 60; ls++) {
+        for (int k = 0; k < HAWKES_P; k++) xn[k] = x[k] + alpha * d[k];
+        double fn = hawkes_nll_grad(xn, ts, dt, n, NULL);
+        if (fn <= f + HAWKES_C1 * alpha * dg) return fn;
+        alpha *= 0.5;
+        if (alpha < 1e-20) break;
+    }
+    /* no progress */
+    for (int k = 0; k < HAWKES_P; k++) xn[k] = x[k];
+    return f;
+}
+
+/* Single BFGS run from theta0.  Returns best NLL; fills theta_out. */
+static double hawkes_bfgs_run(
+    const double theta0[HAWKES_P],
+    const double *ts, const double *dt, int n,
+    double theta_out[HAWKES_P])
+{
+    double x[HAWKES_P], g[HAWKES_P];
+    double xn[HAWKES_P], gn[HAWKES_P];
+    double d[HAWKES_P], s[HAWKES_P], y[HAWKES_P];
+    double H[HAWKES_P][HAWKES_P];
+    int    i, j, k;
+
+    for (k = 0; k < HAWKES_P; k++) x[k] = theta0[k];
+    double f = hawkes_nll_grad(x, ts, dt, n, g);
+    if (!isfinite(f) || f >= 1e14) { for (k=0;k<HAWKES_P;k++) theta_out[k]=x[k]; return f; }
+
+    /* H0 = I */
+    for (i = 0; i < HAWKES_P; i++)
+        for (j = 0; j < HAWKES_P; j++)
+            H[i][j] = (i == j) ? 1.0 : 0.0;
+
+    for (int iter = 0; iter < HAWKES_ITER; iter++) {
+        /* descent direction d = -H g */
+        for (i = 0; i < HAWKES_P; i++) {
+            d[i] = 0.0;
+            for (j = 0; j < HAWKES_P; j++) d[i] -= H[i][j] * g[j];
+        }
+        double dg = 0.0;
+        for (k = 0; k < HAWKES_P; k++) dg += d[k] * g[k];
+
+        /* if not a descent direction, reset to steepest descent */
+        if (!isfinite(dg) || dg >= 0.0) {
+            for (k = 0; k < HAWKES_P; k++) d[k] = -g[k];
+            dg = 0.0;
+            for (k = 0; k < HAWKES_P; k++) dg -= g[k] * g[k];
+            for (i = 0; i < HAWKES_P; i++)
+                for (j = 0; j < HAWKES_P; j++)
+                    H[i][j] = (i == j) ? 1.0 : 0.0;
+        }
+
+        double fn = hawkes_line_search(x, d, f, dg, ts, dt, n, xn);
+        if (fn >= f) break;  /* no progress */
+
+        /* gradient at new point */
+        hawkes_nll_grad(xn, ts, dt, n, gn);
+
+        /* s = xn-x,  y = gn-g */
+        double sy = 0.0;
+        for (k = 0; k < HAWKES_P; k++) {
+            s[k] = xn[k] - x[k];
+            y[k] = gn[k] - g[k];
+            sy  += s[k] * y[k];
+        }
+
+        if (fabs(f - fn) < 1e-12 * (1.0 + fabs(f))) {
+            for (k = 0; k < HAWKES_P; k++) x[k] = xn[k];
+            f = fn;
+            break;
+        }
+
+        for (k = 0; k < HAWKES_P; k++) { x[k] = xn[k]; g[k] = gn[k]; }
+        f = fn;
+
+        /* BFGS inverse-Hessian update (skip if curvature condition fails) */
+        if (sy > 1e-20) {
+            double v[HAWKES_P] = {0.0};
+            for (i = 0; i < HAWKES_P; i++)
+                for (j = 0; j < HAWKES_P; j++)
+                    v[i] += H[i][j] * y[j];
+
+            double yHy = 0.0;
+            for (k = 0; k < HAWKES_P; k++) yHy += y[k] * v[k];
+
+            double rho = 1.0 / sy;
+            for (i = 0; i < HAWKES_P; i++)
+                for (j = 0; j < HAWKES_P; j++)
+                    H[i][j] += rho * ((1.0 + rho * yHy) * s[i]*s[j]
+                                      - v[i]*s[j] - s[i]*v[j]);
+        }
+    }
+
+    for (k = 0; k < HAWKES_P; k++) theta_out[k] = x[k];
+    return f;
+}
+
+/* Public: fit Hawkes MLE on timestamps already shifted to start at 0.
+   ts : sorted float64 array, shifted to ts[0]=0, length n
+   dt : inter-arrival times (dt[0]=0, dt[i]=ts[i]-ts[i-1]), length n
+   Returns 0 on success, 1 on failure (< 3 events, or optimiser diverged).
+   On failure out_mu/alpha/beta are set to NaN. */
+static int hawkes_mle_fit(
+    const double *ts, const double *dt, int n,
+    double *out_mu, double *out_alpha, double *out_beta)
+{
+    *out_mu = *out_alpha = *out_beta = NAN;
+    if (n < 3 || ts[n - 1] <= 0.0) return 1;
+
+    double rate = (double)n / ts[n - 1];
+
+    /* 3 starting points matching the Python implementation */
+    static const double SP[3][3] = {
+        {0.5, 0.3, 1.0},  /* mu_frac, branching_ratio_init, beta_scale */
+        {0.2, 0.6, 2.0},
+        {0.8, 0.1, 0.5},
+    };
+
+    double best = 1e14;
+    double best_theta[HAWKES_P] = {NAN, NAN, NAN};
+
+    for (int s = 0; s < 3; s++) {
+        double mu0    = rate * SP[s][0];
+        double alpha0 = SP[s][1] * rate * SP[s][2];
+        double beta0  = rate * SP[s][2];
+        if (mu0    < 1e-10) mu0    = 1e-10;
+        if (alpha0 < 1e-10) alpha0 = 1e-10;
+        if (beta0  < 1e-10) beta0  = 1e-10;
+
+        double theta0[HAWKES_P] = {log(mu0), log(alpha0), log(beta0)};
+        double theta_out[HAWKES_P];
+        double nll = hawkes_bfgs_run(theta0, ts, dt, n, theta_out);
+
+        if (nll < best) {
+            best = nll;
+            for (int k = 0; k < HAWKES_P; k++) best_theta[k] = theta_out[k];
+        }
+    }
+
+    if (best >= 1e14) return 1;
+
+    *out_mu    = exp(best_theta[0]);
+    *out_alpha = exp(best_theta[1]);
+    *out_beta  = exp(best_theta[2]);
+    return 0;
+}
+
+#undef HAWKES_P
+#undef HAWKES_C1
+#undef HAWKES_ITER
+
 #endif /* LOB_CORE_H */
