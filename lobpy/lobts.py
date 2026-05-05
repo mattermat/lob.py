@@ -1184,17 +1184,41 @@ class LOBts:
         """Return ask quantity time series as property."""
         return self.askq_ts()
 
-    @property
-    def vw_midprice(self):
-        """Return volume-weighted mid-price time series as property."""
+    def vw_midprice_ts(self, start_ts=None, end_ts=None):
+        """
+        Return volume-weighted mid-price time series.
+
+        Args:
+            start_ts: Start timestamp (inclusive)
+            end_ts: End timestamp (inclusive)
+
+        Returns:
+            pandas Series with timestamps as index and vw_midprice values
+        """
         try:
             import pandas as pd
         except ImportError:
             raise ImportError("pandas is required for time series methods")
 
+        if self._mode == "lazy":
+            ts_list, bids, asks, bidqs, askqs = self._seq_extract_best(start_ts, end_ts)
+            import math
+
+            vw_midprices = [
+                (b * bq + a * aq) / (bq + aq)
+                if not math.isnan(b) and not math.isnan(a) and (bq + aq) != 0
+                else float("nan")
+                for b, a, bq, aq in zip(bids, asks, bidqs, askqs)
+            ]
+            return pd.Series(vw_midprices, index=ts_list, name="vw_midprice")
+
         vw_midprices = []
         timestamps = []
         for ts in self.timestamps:
+            if start_ts is not None and ts < start_ts:
+                continue
+            if end_ts is not None and ts > end_ts:
+                continue
             lob = self[ts]
             bid_price = lob.bid[0]
             bid_size = lob.bidq[0]
@@ -1213,16 +1237,42 @@ class LOBts:
         return pd.Series(vw_midprices, index=timestamps, name="vw_midprice")
 
     @property
-    def vi(self):
-        """Return volume imbalance time series as property."""
+    def vw_midprice(self):
+        """Return volume-weighted mid-price time series as property."""
+        return self.vw_midprice_ts()
+
+    def vi_ts(self, start_ts=None, end_ts=None):
+        """
+        Return volume imbalance time series.
+
+        Args:
+            start_ts: Start timestamp (inclusive)
+            end_ts: End timestamp (inclusive)
+
+        Returns:
+            pandas Series with timestamps as index and vi values
+        """
         try:
             import pandas as pd
         except ImportError:
             raise ImportError("pandas is required for time series methods")
 
+        if self._mode == "lazy":
+            ts_list, _, _, bidqs, askqs = self._seq_extract_best(start_ts, end_ts)
+
+            vi_values = [
+                (bq - aq) / (bq + aq) if (bq + aq) != 0 else 0.0
+                for bq, aq in zip(bidqs, askqs)
+            ]
+            return pd.Series(vi_values, index=ts_list, name="vi")
+
         vi_values = []
         timestamps = []
         for ts in self.timestamps:
+            if start_ts is not None and ts < start_ts:
+                continue
+            if end_ts is not None and ts > end_ts:
+                continue
             lob = self[ts]
             bid_size = lob.bidq[0]
             ask_size = lob.askq[0]
@@ -1233,6 +1283,11 @@ class LOBts:
             timestamps.append(ts)
 
         return pd.Series(vi_values, index=timestamps, name="vi")
+
+    @property
+    def vi(self):
+        """Return volume imbalance time series as property."""
+        return self.vi_ts()
 
     def _duration_seconds(self):
         """Return timeline duration in seconds using the configured timestamp_unit."""
@@ -1384,6 +1439,84 @@ class LOBts:
             return 0.0
         return sum(r[8] for r in self._iter_transitions()) / dur
 
+    def _ofi_from_deltas(self):
+        """
+        Compute OFI directly from the delta log (lazy mode only).
+
+        Maintains bid/ask price→qty maps in a single forward pass over deltas,
+        grouping by timestamp. At each timestamp, computes:
+            OFI = (bid_arr - bid_can) - (ask_arr - ask_can)
+
+        Returns:
+            tuple of (timestamps: list[int], ofi_values: list[float])
+        """
+        # Initial state from earliest checkpoint, if any
+        bid_state = {}
+        ask_state = {}
+        ckpt_ts = self._ckpt_ts
+        n_ckpts = len(ckpt_ts)
+        first_ckpt_ts = int(ckpt_ts[0]) if n_ckpts > 0 else None
+
+        if first_ckpt_ts is not None:
+            bids_arr, asks_arr = self._ckpts[first_ckpt_ts]
+            for p, q in bids_arr:
+                bid_state[float(p)] = float(q)
+            for p, q in asks_arr:
+                ask_state[float(p)] = float(q)
+
+        deltas = self._delta_log
+        n_d = len(deltas)
+        if n_d == 0:
+            return [], []
+
+        # Find starting point: only process deltas at or after first checkpoint
+        start_idx = 0
+        if first_ckpt_ts is not None:
+            start_idx = int(np.searchsorted(deltas["ts"], first_ckpt_ts, side="left"))
+
+        timestamps = []
+        ofi_vals = []
+
+        i = start_idx
+        while i < n_d:
+            ts = int(deltas["ts"][i])
+            bid_arr = bid_can = 0.0
+            ask_arr = ask_can = 0.0
+
+            # Process all deltas at this timestamp
+            while i < n_d and int(deltas["ts"][i]) == ts:
+                side = deltas["side"][i]
+                price = float(deltas["price"][i])
+                new_qty = float(deltas["qty"][i])
+
+                if side == 0:  # bid
+                    old_qty = bid_state.get(price, 0.0)
+                    if new_qty > old_qty:
+                        bid_arr += new_qty - old_qty
+                    elif new_qty < old_qty:
+                        bid_can += old_qty - new_qty
+                    if new_qty > 0.0:
+                        bid_state[price] = new_qty
+                    else:
+                        bid_state.pop(price, None)
+                else:  # ask
+                    old_qty = ask_state.get(price, 0.0)
+                    if new_qty > old_qty:
+                        ask_arr += new_qty - old_qty
+                    elif new_qty < old_qty:
+                        ask_can += old_qty - new_qty
+                    if new_qty > 0.0:
+                        ask_state[price] = new_qty
+                    else:
+                        ask_state.pop(price, None)
+
+                i += 1
+
+            timestamps.append(ts)
+            ofi_vals.append((bid_arr - bid_can) - (ask_arr - ask_can))
+
+        return timestamps, ofi_vals
+
     @property
     def order_flow_imbalance(self):
         """
@@ -1401,6 +1534,11 @@ class LOBts:
             import pandas as pd
         except ImportError:
             raise ImportError("pandas is required for order_flow_imbalance")
+
+        if self._mode == "lazy":
+            ts_vals, ofi_vals = self._ofi_from_deltas()
+            return pd.Series(ofi_vals, index=ts_vals, name="ofi")
+
         timestamps = []
         ofi = []
         for ts, bav, bcv, aav, acv, *_ in self._iter_transitions():
