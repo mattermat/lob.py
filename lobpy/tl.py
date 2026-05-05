@@ -457,7 +457,7 @@ class TL:
             return float("nan") if window_size is None else pd.Series(dtype=float)
 
         lob_ts = np.array(lob_ts_list, dtype=np.int64)
-        mid_prices = np.array([self._lobts[ts].midprice for ts in lob_ts_list], dtype=np.float64)
+        mid_prices = self._lobts.midprice_ts().to_numpy(dtype=np.float64)
 
         trades_sorted = sorted(self.trades, key=lambda t: t.timestamp)
         if not trades_sorted:
