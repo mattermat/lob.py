@@ -2,9 +2,8 @@
 timeline_real_data.py — comprehensive TL analytics with progress logging.
 """
 
-import sys
-import warnings
 import time
+import warnings
 from collections import OrderedDict
 
 import numpy as np
@@ -256,8 +255,14 @@ summary = pd.merge_asof(
 sw.tock()
 
 sw.tick("summary: realized_vol 10s + 60s")
-summary = summary.join(tl.realized_vol(window_size=window_10s).rename('realized_vol_10s'), how='left')
-summary = summary.join(tl.realized_vol(window_size=window_60s).rename('realized_vol_60s'), how='left')
+summary = summary.join(
+    tl.realized_vol(window_size=window_10s).rename('realized_vol_10s'),
+    how='left'
+)
+summary = summary.join(
+    tl.realized_vol(window_size=window_60s).rename('realized_vol_60s'),
+    how='left'
+)
 sw.tock()
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -294,7 +299,7 @@ summary = summary.join(rolling_5s, how='left')
 sw.tock()
 
 sw.tick("rolling: gueant ask 5s")
-A_ask_5s, k_ask_5s = tl.gueant.ask(window_size=window_5s, buckets=custom_buckets)
+A_ask_5s, k_ask_5s = tl.gueant.ask(window_size=window_5s, buckets=custom_buckets) # noqa: N806
 sw.tock()
 
 sw.tick("rolling: gueant bid 5s")
