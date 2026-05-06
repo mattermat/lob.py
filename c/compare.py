@@ -5,7 +5,6 @@ import sys
 from pathlib import Path
 
 import pandas as pd
-import numpy as np
 
 TOL = 1e-10
 
