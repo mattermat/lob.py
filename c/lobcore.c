@@ -1,12 +1,7 @@
-#ifndef LOB_CORE_H
-#define LOB_CORE_H
-
-#include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
+#include "lobcore.h"
 #include <math.h>
-#include <stdio.h>
-#include <time.h>
+
+
 
 /* ================================================================== */
 /* Side — one side of the order book (bids or asks)                   */
@@ -14,28 +9,22 @@
 
 #define SIDE_INITIAL_CAP 16
 
-typedef struct {
-    double *data;   /* interleaved [price, qty, price, qty, ...] */
-    int len;        /* number of price levels */
-    int cap;        /* allocated capacity (in levels) */
-    int is_bid;     /* 1 = bids (descending), 0 = asks (ascending) */
-} Side;
 
-static void side_init(Side *s, int is_bid) {
+void side_init(Side *s, int is_bid) {
     s->data = (double *)malloc(SIDE_INITIAL_CAP * 2 * sizeof(double));
     s->len = 0;
     s->cap = SIDE_INITIAL_CAP;
     s->is_bid = is_bid;
 }
 
-static void side_free(Side *s) {
+void side_free(Side *s) {
     free(s->data);
     s->data = NULL;
     s->len = 0;
     s->cap = 0;
 }
 
-static void side_grow(Side *s) {
+void side_grow(Side *s) {
     int new_cap = s->cap * 2;
     double *nd = (double *)realloc(s->data, (size_t)new_cap * 2 * sizeof(double));
     if (!nd) return;
@@ -43,7 +32,7 @@ static void side_grow(Side *s) {
     s->cap = new_cap;
 }
 
-static int side_find(const Side *s, double price) {
+int side_find(const Side *s, double price) {
     int lo = 0, hi = s->len - 1;
     while (lo <= hi) {
         int mid = lo + (hi - lo) / 2;
@@ -60,7 +49,7 @@ static int side_find(const Side *s, double price) {
     return -1;
 }
 
-static int side_insert_pos(const Side *s, double price) {
+int side_insert_pos(const Side *s, double price) {
     int lo = 0, hi = s->len;
     while (lo < hi) {
         int mid = lo + (hi - lo) / 2;
@@ -76,7 +65,7 @@ static int side_insert_pos(const Side *s, double price) {
     return lo;
 }
 
-static void side_insert_at(Side *s, int pos, double price, double qty) {
+void side_insert_at(Side *s, int pos, double price, double qty) {
     if (s->len >= s->cap) side_grow(s);
     if (pos < s->len)
         memmove(&s->data[(pos + 1) * 2], &s->data[pos * 2],
@@ -86,14 +75,14 @@ static void side_insert_at(Side *s, int pos, double price, double qty) {
     s->len++;
 }
 
-static void side_delete_at(Side *s, int pos) {
+void side_delete_at(Side *s, int pos) {
     if (pos < s->len - 1)
         memmove(&s->data[pos * 2], &s->data[(pos + 1) * 2],
                 (size_t)(s->len - pos - 1) * 2 * sizeof(double));
     s->len--;
 }
 
-static void side_update(Side *s, double price, double qty) {
+void side_update(Side *s, double price, double qty) {
     int idx = side_find(s, price);
     if (idx >= 0) {
         if (qty == 0.0)
@@ -105,7 +94,7 @@ static void side_update(Side *s, double price, double qty) {
     }
 }
 
-static void side_set(Side *s, const double *prices, const double *qtys, int n) {
+void side_set(Side *s, const double *prices, const double *qtys, int n) {
     if (n > s->cap) {
         int nc = SIDE_INITIAL_CAP;
         while (nc < n) nc *= 2;
@@ -120,14 +109,14 @@ static void side_set(Side *s, const double *prices, const double *qtys, int n) {
     s->len = n;
 }
 
-static void side_clear(Side *s) { s->len = 0; }
+void side_clear(Side *s) { s->len = 0; }
 
-static double side_at(const Side *s, double price) {
+double side_at(const Side *s, double price) {
     int idx = side_find(s, price);
     return idx >= 0 ? s->data[idx * 2 + 1] : 0.0;
 }
 
-static void side_sort_desc(double *data, int n) {
+void side_sort_desc(double *data, int n) {
     for (int i = 1; i < n; i++) {
         double pk = data[i * 2], qk = data[i * 2 + 1];
         int j = i - 1;
@@ -141,7 +130,7 @@ static void side_sort_desc(double *data, int n) {
     }
 }
 
-static void side_sort_asc(double *data, int n) {
+void side_sort_asc(double *data, int n) {
     for (int i = 1; i < n; i++) {
         double pk = data[i * 2], qk = data[i * 2 + 1];
         int j = i - 1;
@@ -155,7 +144,7 @@ static void side_sort_asc(double *data, int n) {
     }
 }
 
-static double side_aggq_nlevel(const Side *s, int nlevel) {
+double side_aggq_nlevel(const Side *s, int nlevel) {
     if (nlevel <= 0 || s->len == 0) return 0.0;
     int end = nlevel < s->len ? nlevel : s->len;
     double total = 0.0;
@@ -163,7 +152,7 @@ static double side_aggq_nlevel(const Side *s, int nlevel) {
     return total;
 }
 
-static double side_aggq_price(const Side *s, double price) {
+double side_aggq_price(const Side *s, double price) {
     if (s->len == 0) return 0.0;
     double total = 0.0;
     if (s->is_bid) {
@@ -181,7 +170,7 @@ static double side_aggq_price(const Side *s, double price) {
 }
 
 /* Copy src into dst (dst must already be initialised). */
-static void side_copy(Side *dst, const Side *src) {
+void side_copy(Side *dst, const Side *src) {
     if (src->len == 0) { dst->len = 0; return; }
     if (src->len > dst->cap) {
         int nc = SIDE_INITIAL_CAP;
@@ -198,15 +187,8 @@ static void side_copy(Side *dst, const Side *src) {
 /* LobBook — the double-sided order book (bids + asks)                */
 /* ================================================================== */
 
-typedef struct {
-    Side       bids;
-    Side       asks;
-    double     tick_size;
-    long long  timestamp;
-    char       name[64];
-} LobBook;
 
-static LobBook *lob_create(const char *name, double tick_size, long long timestamp) {
+LobBook *lob_create(const char *name, double tick_size, long long timestamp) {
     LobBook *lob = (LobBook *)calloc(1, sizeof(LobBook));
     if (!lob) return NULL;
     side_init(&lob->bids, 1);
@@ -220,14 +202,14 @@ static LobBook *lob_create(const char *name, double tick_size, long long timesta
     return lob;
 }
 
-static void lob_destroy(LobBook *lob) {
+void lob_destroy(LobBook *lob) {
     if (!lob) return;
     side_free(&lob->bids);
     side_free(&lob->asks);
     free(lob);
 }
 
-static LobBook *lob_copy(const LobBook *src) {
+LobBook *lob_copy(const LobBook *src) {
     LobBook *dst = (LobBook *)calloc(1, sizeof(LobBook));
     if (!dst) return NULL;
     side_init(&dst->bids, 1);
@@ -240,7 +222,7 @@ static LobBook *lob_copy(const LobBook *src) {
     return dst;
 }
 
-static void lob_set_snapshot(LobBook *lob, long long ts,
+void lob_set_snapshot(LobBook *lob, long long ts,
                               const double *bid_p, const double *bid_q, int n_bids,
                               const double *ask_p, const double *ask_q, int n_asks) {
     if (n_bids > 0 && bid_p && bid_q) {
@@ -258,7 +240,7 @@ static void lob_set_snapshot(LobBook *lob, long long ts,
     if (ts != 0) lob->timestamp = ts;
 }
 
-static void lob_set_updates(LobBook *lob, long long ts,
+void lob_set_updates(LobBook *lob, long long ts,
                              const uint8_t *sides, const double *prices,
                              const double *qtys, int n) {
     for (int i = 0; i < n; i++) {
@@ -268,53 +250,53 @@ static void lob_set_updates(LobBook *lob, long long ts,
     if (ts != 0) lob->timestamp = ts;
 }
 
-static void lob_update_level(LobBook *lob, long long ts, int side, double price, double qty) {
+void lob_update_level(LobBook *lob, long long ts, int side, double price, double qty) {
     if (side == 0) side_update(&lob->bids, price, qty);
     else           side_update(&lob->asks, price, qty);
     if (ts != 0) lob->timestamp = ts;
 }
 
-static void lob_delete_bid(LobBook *lob, long long ts, double price) {
+void lob_delete_bid(LobBook *lob, long long ts, double price) {
     int idx = side_find(&lob->bids, price);
     if (idx >= 0) side_delete_at(&lob->bids, idx);
     if (ts != 0) lob->timestamp = ts;
 }
 
-static void lob_delete_ask(LobBook *lob, long long ts, double price) {
+void lob_delete_ask(LobBook *lob, long long ts, double price) {
     int idx = side_find(&lob->asks, price);
     if (idx >= 0) side_delete_at(&lob->asks, idx);
     if (ts != 0) lob->timestamp = ts;
 }
 
-static double lob_at(const LobBook *lob, int side, double price) {
+double lob_at(const LobBook *lob, int side, double price) {
     return side == 0 ? side_at(&lob->bids, price) : side_at(&lob->asks, price);
 }
 
-static void lob_get_bids(const LobBook *lob, const double **out_data, int *out_len) {
+void lob_get_bids(const LobBook *lob, const double **out_data, int *out_len) {
     *out_data = lob->bids.data;
     *out_len  = lob->bids.len;
 }
 
-static void lob_get_asks(const LobBook *lob, const double **out_data, int *out_len) {
+void lob_get_asks(const LobBook *lob, const double **out_data, int *out_len) {
     *out_data = lob->asks.data;
     *out_len  = lob->asks.len;
 }
 
-static double lob_spread(const LobBook *lob) {
+double lob_spread(const LobBook *lob) {
     if (lob->bids.len == 0 || lob->asks.len == 0) return NAN;
     double bp = lob->bids.data[0], ap = lob->asks.data[0];
     if (bp <= 0 || ap <= 0) return NAN;
     return ap - bp;
 }
 
-static double lob_midprice(const LobBook *lob) {
+double lob_midprice(const LobBook *lob) {
     if (lob->bids.len == 0 || lob->asks.len == 0) return NAN;
     double bp = lob->bids.data[0], ap = lob->asks.data[0];
     if (bp <= 0 || ap <= 0) return NAN;
     return (bp + ap) / 2.0;
 }
 
-static double lob_vw_midprice(const LobBook *lob) {
+double lob_vw_midprice(const LobBook *lob) {
     if (lob->bids.len == 0 || lob->asks.len == 0) return NAN;
     double bp = lob->bids.data[0], bq = lob->bids.data[1];
     double ap = lob->asks.data[0], aq = lob->asks.data[1];
@@ -322,19 +304,19 @@ static double lob_vw_midprice(const LobBook *lob) {
     return (bp * bq + ap * aq) / (bq + aq);
 }
 
-static double lob_spread_tick(const LobBook *lob) {
+double lob_spread_tick(const LobBook *lob) {
     double s = lob_spread(lob);
     return isnan(s) ? NAN : s / lob->tick_size;
 }
 
-static double lob_spread_rel(const LobBook *lob) {
+double lob_spread_rel(const LobBook *lob) {
     if (lob->bids.len == 0) return NAN;
     double mp = lob_midprice(lob);
     if (mp <= 0) return NAN;
     return lob_spread(lob) / mp;
 }
 
-static double lob_vi(const LobBook *lob, int nlevels) {
+double lob_vi(const LobBook *lob, int nlevels) {
     if (lob->bids.len == 0 && lob->asks.len == 0) return 0.0;
     double bsum = 0.0, asum = 0.0;
     int bn = nlevels < lob->bids.len ? nlevels : lob->bids.len;
@@ -345,12 +327,12 @@ static double lob_vi(const LobBook *lob, int nlevels) {
     return (bsum - asum) / (bsum + asum);
 }
 
-static double lob_aggq_nlevel(const LobBook *lob, int side, int nlevel) {
+double lob_aggq_nlevel(const LobBook *lob, int side, int nlevel) {
     return side == 0 ? side_aggq_nlevel(&lob->bids, nlevel)
                      : side_aggq_nlevel(&lob->asks, nlevel);
 }
 
-static double lob_aggq_ticks(const LobBook *lob, int side, int ticks) {
+double lob_aggq_ticks(const LobBook *lob, int side, int ticks) {
     if (lob->tick_size <= 0) return 0.0;
     double total = 0.0;
     if (side == 0) {
@@ -371,12 +353,12 @@ static double lob_aggq_ticks(const LobBook *lob, int side, int ticks) {
     return total;
 }
 
-static double lob_aggq_price(const LobBook *lob, int side, double price) {
+double lob_aggq_price(const LobBook *lob, int side, double price) {
     return side == 0 ? side_aggq_price(&lob->bids, price)
                      : side_aggq_price(&lob->asks, price);
 }
 
-static double lob_slippage(const LobBook *lob, double volume, int side) {
+double lob_slippage(const LobBook *lob, double volume, int side) {
     if (volume <= 0) return 0.0;
     double mp = lob_midprice(lob);
     if (isnan(mp)) return NAN;
@@ -400,7 +382,7 @@ static double lob_slippage(const LobBook *lob, double volume, int side) {
     }
 }
 
-static int lob_len_in_tick(const LobBook *lob, int side, double price) {
+int lob_len_in_tick(const LobBook *lob, int side, double price) {
     if (side == 0) {
         if (lob->bids.len == 0) return -1;
         double best = lob->bids.data[0];
@@ -414,16 +396,16 @@ static int lob_len_in_tick(const LobBook *lob, int side, double price) {
     }
 }
 
-static int lob_check(const LobBook *lob) {
+int lob_check(const LobBook *lob) {
     if (lob->bids.len == 0 || lob->asks.len == 0) return 1;
     return lob->bids.data[0] < lob->asks.data[0];
 }
 
-static void       lob_set_tick_size(LobBook *lob, double ts) { lob->tick_size = ts; }
-static double     lob_get_tick_size(const LobBook *lob)      { return lob->tick_size; }
-static long long  lob_timestamp(const LobBook *lob)          { return lob->timestamp; }
-static void       lob_set_timestamp(LobBook *lob, long long ts) { lob->timestamp = ts; }
-static const char *lob_name(const LobBook *lob)              { return lob->name; }
+void       lob_set_tick_size(LobBook *lob, double ts) { lob->tick_size = ts; }
+double     lob_get_tick_size(const LobBook *lob)      { return lob->tick_size; }
+long long  lob_timestamp(const LobBook *lob)          { return lob->timestamp; }
+void       lob_set_timestamp(LobBook *lob, long long ts) { lob->timestamp = ts; }
+const char *lob_name(const LobBook *lob)              { return lob->name; }
 
 /* ================================================================== */
 /* LOBts — time-series of LobBooks (delta and latest modes)           */
@@ -434,17 +416,8 @@ static const char *lob_name(const LobBook *lob)              { return lob->name;
 #define LOBTS_LATEST  1
 #define LOBTS_INITIAL_CAP 16
 
-typedef struct {
-    char       name[64];
-    double     tick_size;
-    int        mode;
-    long long *ts_arr;   /* sorted timestamp array (owned) */
-    LobBook  **lob_arr;  /* parallel LobBook* array (owned) */
-    int        len;
-    int        cap;
-} LOBts;
 
-static void lobts_grow(LOBts *lt) {
+void lobts_grow(LOBts *lt) {
     int nc = lt->cap * 2;
     long long *nt = (long long *)realloc(lt->ts_arr,  (size_t)nc * sizeof(long long));
     LobBook  **nl = (LobBook  **)realloc(lt->lob_arr, (size_t)nc * sizeof(LobBook *));
@@ -455,7 +428,7 @@ static void lobts_grow(LOBts *lt) {
 }
 
 /* Binary search: return index of ts, or -1 if not found. */
-static int lobts_find(const LOBts *lt, long long ts) {
+int lobts_find(const LOBts *lt, long long ts) {
     int lo = 0, hi = lt->len - 1;
     while (lo <= hi) {
         int mid = lo + (hi - lo) / 2;
@@ -467,7 +440,7 @@ static int lobts_find(const LOBts *lt, long long ts) {
 }
 
 /* Return index where ts would be inserted to keep the array sorted. */
-static int lobts_insert_pos(const LOBts *lt, long long ts) {
+int lobts_insert_pos(const LOBts *lt, long long ts) {
     int lo = 0, hi = lt->len;
     while (lo < hi) {
         int mid = lo + (hi - lo) / 2;
@@ -477,7 +450,7 @@ static int lobts_insert_pos(const LOBts *lt, long long ts) {
     return lo;
 }
 
-static void lobts_insert_at(LOBts *lt, int pos, long long ts, LobBook *lob) {
+void lobts_insert_at(LOBts *lt, int pos, long long ts, LobBook *lob) {
     if (lt->len >= lt->cap) lobts_grow(lt);
     if (pos < lt->len) {
         memmove(&lt->ts_arr[pos + 1],  &lt->ts_arr[pos],
@@ -490,7 +463,7 @@ static void lobts_insert_at(LOBts *lt, int pos, long long ts, LobBook *lob) {
     lt->len++;
 }
 
-static LOBts *lobts_create(const char *name, double tick_size, int mode) {
+LOBts *lobts_create(const char *name, double tick_size, int mode) {
     LOBts *lt = (LOBts *)calloc(1, sizeof(LOBts));
     if (!lt) return NULL;
     if (name) {
@@ -506,7 +479,7 @@ static LOBts *lobts_create(const char *name, double tick_size, int mode) {
     return lt;
 }
 
-static void lobts_destroy(LOBts *lt) {
+void lobts_destroy(LOBts *lt) {
     if (!lt) return;
     for (int i = 0; i < lt->len; i++) lob_destroy(lt->lob_arr[i]);
     free(lt->ts_arr);
@@ -514,21 +487,21 @@ static void lobts_destroy(LOBts *lt) {
     free(lt);
 }
 
-static void lobts_clear(LOBts *lt) {
+void lobts_clear(LOBts *lt) {
     for (int i = 0; i < lt->len; i++) lob_destroy(lt->lob_arr[i]);
     lt->len = 0;
 }
 
-static int       lobts_len(const LOBts *lt)     { return lt->len; }
-static long long lobts_last_ts(const LOBts *lt) { return lt->len > 0 ? lt->ts_arr[lt->len - 1] : -1; }
-static const char *lobts_get_name(const LOBts *lt) { return lt->name; }
+int       lobts_len(const LOBts *lt)     { return lt->len; }
+long long lobts_last_ts(const LOBts *lt) { return lt->len > 0 ? lt->ts_arr[lt->len - 1] : -1; }
+const char *lobts_get_name(const LOBts *lt) { return lt->name; }
 
 /*
  * Set a full snapshot at ts.
  * Returns  0 on success.
  * Returns -1 if ts already exists and force == 0.
  */
-static int lobts_set_snapshot(LOBts *lt, long long ts,
+int lobts_set_snapshot(LOBts *lt, long long ts,
                                const double *bid_p, const double *bid_q, int n_bids,
                                const double *ask_p, const double *ask_q, int n_asks,
                                int force) {
@@ -557,7 +530,7 @@ static int lobts_set_snapshot(LOBts *lt, long long ts,
  * or creates an empty LOB if the series is empty.
  * If ts already exists, updates it in place.
  */
-static void lobts_set_updates(LOBts *lt, long long ts,
+void lobts_set_updates(LOBts *lt, long long ts,
                                const uint8_t *sides, const double *prices,
                                const double *qtys, int n) {
     int existing = lobts_find(lt, ts);
@@ -582,17 +555,17 @@ static void lobts_set_updates(LOBts *lt, long long ts,
 }
 
 /* Get LOB at exact timestamp (borrowed — do NOT destroy). Returns NULL if not found. */
-static LobBook *lobts_get(const LOBts *lt, long long ts) {
+LobBook *lobts_get(const LOBts *lt, long long ts) {
     int idx = lobts_find(lt, ts);
     return idx >= 0 ? lt->lob_arr[idx] : NULL;
 }
 
 /* Index-based access (for iteration). */
-static LobBook  *lobts_get_at(const LOBts *lt, int i) { return (i >= 0 && i < lt->len) ? lt->lob_arr[i] : NULL; }
-static long long lobts_ts_at (const LOBts *lt, int i) { return (i >= 0 && i < lt->len) ? lt->ts_arr[i]  : -1;   }
+LobBook  *lobts_get_at(const LOBts *lt, int i) { return (i >= 0 && i < lt->len) ? lt->lob_arr[i] : NULL; }
+long long lobts_ts_at (const LOBts *lt, int i) { return (i >= 0 && i < lt->len) ? lt->ts_arr[i]  : -1;   }
 
 /* Expose the raw sorted timestamp array (borrowed). */
-static void lobts_get_timestamps(const LOBts *lt, const long long **out_ts, int *out_len) {
+void lobts_get_timestamps(const LOBts *lt, const long long **out_ts, int *out_len) {
     *out_ts  = lt->ts_arr;
     *out_len = lt->len;
 }
@@ -603,7 +576,7 @@ static void lobts_get_timestamps(const LOBts *lt, const long long **out_ts, int 
  * The new LOBts owns deep copies of all included LobBooks.
  * Caller must call lobts_destroy() on the result.
  */
-static LOBts *lobts_get_range(const LOBts *lt, long long start_ts, long long end_ts,
+LOBts *lobts_get_range(const LOBts *lt, long long start_ts, long long end_ts,
                                int has_start, int has_end) {
     LOBts *result = lobts_create(lt->name, lt->tick_size, lt->mode);
     if (!result) return NULL;
@@ -630,7 +603,7 @@ static LOBts *lobts_get_range(const LOBts *lt, long long start_ts, long long end
  * Binary search: leftmost index i such that arr[i] >= val.
  * Returns n if all elements are < val.
  */
-static int bsearch_left_ll(const long long *arr, int n, long long val) {
+int bsearch_left_ll(const long long *arr, int n, long long val) {
     int lo = 0, hi = n;
     while (lo < hi) {
         int mid = lo + (hi - lo) / 2;
@@ -645,7 +618,7 @@ static int bsearch_left_ll(const long long *arr, int n, long long val) {
  * The caller guarantees the data is already in the correct sort order
  * (descending for bids, ascending for asks).
  */
-static void side_load_flat(Side *s, const double *flat, int n_levels) {
+void side_load_flat(Side *s, const double *flat, int n_levels) {
     if (n_levels == 0) { s->len = 0; return; }
     if (n_levels > s->cap) {
         int nc = s->cap;
@@ -683,7 +656,7 @@ static void side_load_flat(Side *s, const double *flat, int n_levels) {
  * out_*         caller-allocated float64 output arrays, length n_ts;
  *               NaN is written when the respective side is empty
  */
-static void lobts_seq_extract_best(
+void lobts_seq_extract_best(
     const long long *all_ts,    int n_ts,
     const long long *ckpt_ts,   int n_ckpts,
     const int       *bid_offs,  const double *ckpt_bids,
@@ -777,7 +750,7 @@ static void lobts_seq_extract_best(
  *     out_ask_data[*out_total_ask * 2], then call again with the same inputs.
  *     Fills the data arrays in addition to the offset tables.
  */
-static void lobts_iter_seq_states(
+void lobts_iter_seq_states(
     const long long *all_ts,    int n_ts,
     const long long *ckpt_ts,   int n_ckpts,
     const int       *bid_offs,  const double *ckpt_bids,
@@ -865,7 +838,7 @@ static void lobts_iter_seq_states(
 /* Return bucket index for integer delta d, given sorted int thresholds.
    Bin b covers delta in (thresholds[b-1], thresholds[b]] (bin 0 from 0).
    Returns n_buckets for overflow (d > all thresholds). */
-static int gueant_find_bucket(int d, const int *thresholds, int n_buckets) {
+int gueant_find_bucket(int d, const int *thresholds, int n_buckets) {
     for (int b = 0; b < n_buckets; b++)
         if (d <= thresholds[b]) return b;
     return n_buckets;
@@ -874,7 +847,7 @@ static int gueant_find_bucket(int d, const int *thresholds, int n_buckets) {
 /* OLS log-linear fit: log(N[b]/T[b]) = intercept + slope * thresholds[b]
    => A = exp(intercept), k = -slope.
    Sets *out_A = *out_k = NAN when fewer than 2 valid (T>0 and N>0) points. */
-static void gueant_fit(const int *thresholds, const double *T_agg,
+void gueant_fit(const int *thresholds, const double *T_agg,
                        const double *N_agg, int n_buckets,
                        double *out_A, double *out_k) {
     int    n_v   = 0;
@@ -916,7 +889,7 @@ static void gueant_fit(const int *thresholds, const double *T_agg,
  *
  * Outputs: out_A[n_all_ts], out_k[n_all_ts]
  */
-static void gueant_rolling_buckets(
+void gueant_rolling_buckets(
     const long long *lob_ts,       int n_lob,
     const int       *bid_offs,     const double *bid_data,
     const int       *ask_offs,     const double *ask_data,
@@ -1121,20 +1094,9 @@ cleanup:
 
 #define TRADES_INITIAL_CAP 64
 
-typedef struct {
-    long long timestamp;
-    uint8_t   side;    /* 0 = buy aggressor ('b'), 1 = sell aggressor ('s') */
-    double    price;
-    double    volume;
-} TradeEntry;
 
-typedef struct {
-    TradeEntry *data;
-    int         len;
-    int         cap;
-} Trades;
 
-static Trades *trades_create(void) {
+Trades *trades_create(void) {
     Trades *tr = (Trades *)calloc(1, sizeof(Trades));
     if (!tr) return NULL;
     tr->data = (TradeEntry *)malloc(TRADES_INITIAL_CAP * sizeof(TradeEntry));
@@ -1143,16 +1105,16 @@ static Trades *trades_create(void) {
     return tr;
 }
 
-static void trades_destroy(Trades *tr) {
+void trades_destroy(Trades *tr) {
     if (!tr) return;
     free(tr->data);
     free(tr);
 }
 
-static void trades_clear(Trades *tr) { tr->len = 0; }
-static int  trades_len(const Trades *tr) { return tr->len; }
+void trades_clear(Trades *tr) { tr->len = 0; }
+int  trades_len(const Trades *tr) { return tr->len; }
 
-static void trades_grow(Trades *tr) {
+void trades_grow(Trades *tr) {
     int nc = tr->cap * 2;
     TradeEntry *nd = (TradeEntry *)realloc(tr->data, (size_t)nc * sizeof(TradeEntry));
     if (!nd) return;
@@ -1160,7 +1122,7 @@ static void trades_grow(Trades *tr) {
     tr->cap  = nc;
 }
 
-static void trades_append(Trades *tr, long long ts, int side, double price, double volume) {
+void trades_append(Trades *tr, long long ts, int side, double price, double volume) {
     if (tr->len >= tr->cap) trades_grow(tr);
     TradeEntry *e = &tr->data[tr->len++];
     e->timestamp = ts;
@@ -1169,7 +1131,7 @@ static void trades_append(Trades *tr, long long ts, int side, double price, doub
     e->volume    = volume;
 }
 
-static void trades_get_at(const Trades *tr, int i,
+void trades_get_at(const Trades *tr, int i,
                            long long *ts, int *side, double *price, double *volume) {
     if (i < 0 || i >= tr->len) { *ts = 0; *side = 0; *price = 0.0; *volume = 0.0; return; }
     const TradeEntry *e = &tr->data[i];
@@ -1179,7 +1141,7 @@ static void trades_get_at(const Trades *tr, int i,
     *volume = e->volume;
 }
 
-static void trades_append_bulk(Trades *tr,
+void trades_append_bulk(Trades *tr,
                                 const long long *ts, const uint8_t *sides,
                                 const double *prices, const double *volumes, int n) {
     for (int i = 0; i < n; i++)
@@ -1211,7 +1173,7 @@ static void trades_append_bulk(Trades *tr,
  * The caller guarantees that within each timestamp, events are ordered
  * book_level → book_update → trade (enforced by structural validation).
  */
-static void lobpy_validate_full(
+void lobpy_validate_full(
     const long long *timestamps,
     const uint8_t   *event_types,
     const uint8_t   *sides,
@@ -1326,7 +1288,7 @@ static void lobpy_validate_full(
 /* Negative log-likelihood + analytical gradient.
    theta = [log μ, log α, log β].
    grad may be NULL (skips gradient accumulation; NLL is still exact). */
-static double hawkes_nll_grad(
+double hawkes_nll_grad(
     const double theta[HAWKES_P],
     const double *ts, const double *dt, int n,
     double grad[HAWKES_P])
@@ -1390,7 +1352,7 @@ static double hawkes_nll_grad(
 /* Backtracking line search (Armijo condition).
    Returns f at accepted step; fills xn with new point.
    Returns f unchanged and xn=x when no progress is found. */
-static double hawkes_line_search(
+double hawkes_line_search(
     const double x[HAWKES_P], const double d[HAWKES_P],
     double f, double dg,
     const double *ts, const double *dt, int n,
@@ -1410,7 +1372,7 @@ static double hawkes_line_search(
 }
 
 /* Single BFGS run from theta0.  Returns best NLL; fills theta_out. */
-static double hawkes_bfgs_run(
+double hawkes_bfgs_run(
     const double theta0[HAWKES_P],
     const double *ts, const double *dt, int n,
     double theta_out[HAWKES_P])
@@ -1499,7 +1461,7 @@ static double hawkes_bfgs_run(
    dt : inter-arrival times (dt[0]=0, dt[i]=ts[i]-ts[i-1]), length n
    Returns 0 on success, 1 on failure (< 3 events, or optimiser diverged).
    On failure out_mu/alpha/beta are set to NaN. */
-static int hawkes_mle_fit(
+int hawkes_mle_fit(
     const double *ts, const double *dt, int n,
     double *out_mu, double *out_alpha, double *out_beta)
 {
@@ -1548,4 +1510,3 @@ static int hawkes_mle_fit(
 #undef HAWKES_C1
 #undef HAWKES_ITER
 
-#endif /* LOB_CORE_H */

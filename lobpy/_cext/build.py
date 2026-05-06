@@ -149,6 +149,27 @@ ffibuilder.cdef("""
     void trades_append_bulk(Trades *tr,
                              const long long *ts, const uint8_t *sides,
                              const double *prices, const double *volumes, int n);
+
+    /* ---- Hawkes MLE ---- */
+    /* ts  : timestamps shifted to start at 0, length n
+       dt  : inter-arrival times (dt[0]=0, dt[i]=ts[i]-ts[i-1]), length n
+       Returns 0 on success, 1 on failure; outputs set to NaN on failure. */
+    int hawkes_mle_fit(const double *ts, const double *dt, int n,
+                       double *out_mu, double *out_alpha, double *out_beta);
+
+    /* ---- Full consistency checker ---- */
+    void lobpy_validate_full(
+        const long long *timestamps,
+        const uint8_t   *event_types,
+        const uint8_t   *sides,
+        const double    *prices,
+        const double    *quantities,
+        int              n_rows,
+        long long       *out_failed_ts,
+        double          *out_failed_bid,
+        double          *out_failed_ask,
+        int             *out_n_failed
+    );
 """)
 
 here = os.path.dirname(os.path.abspath(__file__))

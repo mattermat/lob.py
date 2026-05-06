@@ -1,146 +1,170 @@
 # `LOBts` API (Time Series LOB)
 
 ### Initialization
-- `LOBts(name=None, tick_size=1, mode='delta')`: Create time series LOB
-  - `name`: Optional identifier for the time series
-  - `tick_size`: Minimum price increment (default: 1)
-  - `mode`: Storage mode - `'delta'` (store all snapshots) or `'latest'` (keep only current state)
+`LOBts(name=None, tick_size=1, mode='lazy', timestamp_unit='ns')`
+- `name`: Optional identifier for the time series (auto-generated if `None`)
+- `tick_size`: Minimum price increment (default: `1`)
+- `mode`: Storage mode — `'lazy'` (default), `'eager'`, or `'latest'`
+- `timestamp_unit`: Unit of all timestamps — `'s'`, `'ms'`, `'us'`, or `'ns'` (default: `'ns'`). Used to compute per-second rates in frequency properties.
+
+### Storage modes
+
+#### `mode='lazy'` (default)
+Stores only **checkpoints** (full snapshots at sparse intervals) plus a **delta log** (compact numpy structured array of `(ts, side, price, qty)` changes). LOB states at arbitrary timestamps are **reconstructed on demand** from the nearest preceding checkpoint + delta replay, and cached in an LRU cache (max 32 entries).
+
+- **Memory**: O(C + D) where C = total checkpoint levels and D = total delta rows — dramatically lower than eager for large files.
+- **Random access** (`lobts[ts]`): O(D/C) amortised (replay from nearest checkpoint).
+- **Sequential analytics** (`spread_ts`, `bid_ts`, etc.): O(N + D) via a single C forward pass (`lobts_seq_extract_best`), avoiding per-timestamp reconstruction entirely.
+- **`build_checkpoints(n=100)`**: generates `n` evenly spaced checkpoints from the delta log to bound random-access cost. Called automatically after `from_parquet(..., mode='lazy')`.
+- `set_snapshot` stores the bids/asks as a checkpoint (numpy arrays).
+- `set_updates` appends rows to the delta log; returns `None`.
+
+#### `mode='eager'`
+Every snapshot/update is stored as a **full `LobBook` object in C memory**. No reconstruction needed.
+
+- **Memory**: O(N × L) where N = number of timestamps, L = average levels per snapshot.
+- **Random access**: O(log N) binary search in C array.
+- `set_updates` copies the previous LOB state, applies deltas, and stores a new full snapshot. Returns the new `LOB` object.
+
+#### `mode='latest'`
+Keeps **only the most recent snapshot** in C memory — previous snapshots are discarded.
+
+- **Memory**: O(L) — constant regardless of history length.
+- `set_snapshot` replaces the single stored LOB.
+- `set_updates` copies the current LOB, applies deltas, and replaces it.
+- Random access only works for the latest timestamp; all others return `None`.
 
 ### Core Methods
-- `set_snapshot(bids, asks, timestamp=0, force=False)`: Create LOB snapshot at timestamp
-  - `bids`: List of `(price, size)` tuples for bid side
-  - `asks`: List of `(price, size)` tuples for ask side
-  - `timestamp`: Timestamp for this snapshot
-  - `force`: If `True`, overwrite existing timestamp (default raises error)
+- `set_snapshot(bids, asks, timestamp=0, force=False)`: create a LOB snapshot at the given timestamp
+  - `bids`: list of `(price, size)` tuples for bid side
+  - `asks`: list of `(price, size)` tuples for ask side
+  - `timestamp`: timestamp for this snapshot
+  - `force`: if `True`, overwrite existing timestamp (default raises `ValueError`)
+  - In **lazy** mode: stores as a checkpoint array pair
+  - In **eager/latest** mode: stored as a C `LobBook`
 
-- `set_updates(updates, timestamp=0)`: Apply updates to create new snapshot
-  - `updates`: List of `(side, price, size)` tuples
+- `set_updates(updates, timestamp=0)`: apply incremental updates to create a new LOB state
+  - `updates`: list of `(side, price, size)` tuples
     - `side`: `'b'`/`'bid'` for bids, `'a'`/`'ask'` for asks
-    - `price`: Price level
-    - `size`: Quantity (0 to delete level)
-  - `timestamp`: Timestamp for this snapshot
-  - Returns: The new LOB object
+    - `size`: quantity (`0` to delete level)
+  - `timestamp`: timestamp for this snapshot
+  - **Lazy**: appends rows to the delta log; returns `None`
+  - **Eager/latest**: copies previous state, applies deltas, stores new snapshot; returns the new `LOB`
 
-- `update(side, price_level, size, timestamp=0)`: Apply single update
-  - `side`: `'b'`/`'bid'` or `'a'`/`'ask'`
-  - `price_level`: Price level
-  - `size`: Quantity (0 to delete level)
-  - `timestamp`: Timestamp for this snapshot
-  - Returns: The new LOB object
+- `update(side, price_level, size, timestamp=0)`: apply a single update (delegates to `set_updates`)
+  - Returns: the new `LOB` object (eager/latest) or `None` (lazy)
+
+- `build_checkpoints(n=100)`: generate `n` evenly spaced checkpoints from the delta log (lazy mode only)
+  - Makes random access via `lobts[ts]` O(D/n) instead of O(D)
+  - Called automatically after `from_parquet(..., mode='lazy')`
+
+### Properties
+- `mode`: the storage mode string (`'lazy'`, `'eager'`, or `'latest'`)
+- `timestamps`: sorted list of all LOB timestamps
+- `len`: number of timestamps (same as `len(lobts)`)
+- `len_ts`: duration — `last_timestamp - first_timestamp`
 
 ### Time Indexing
-- `lobts[timestamp]`: Access LOB at specific timestamp
+- `lobts[timestamp]`: access LOB at a specific timestamp
   - Returns: `LOB` object or `None` if not found
+  - **Lazy**: reconstructs from nearest checkpoint + delta replay (cached)
+  - **Eager/latest**: binary search in C array
 
-- `lobts[start:end]`: Slice time range
-  - `start`: Start timestamp (inclusive)
-  - `end`: End timestamp (inclusive)
-  - Returns: New `LOBts` with filtered snapshots
+- `lobts[start:end]`: slice time range (both inclusive)
+  - Returns: new `LOBts` with filtered snapshots
+  - **Lazy**: copies the nearest preceding checkpoint (as reconstruction anchor) plus relevant deltas; result is also lazy
 
-- `lobts.timestamps`: Property returning sorted list of timestamps
-  - Returns: List of timestamps in chronological order
+- `timestamp in lobts`: check if a timestamp exists (`__contains__`)
+  - **Lazy**: checks checkpoints and delta log
+  - **Eager/latest**: binary search in C
 
-- `lobts.len`: Property returning number of snapshots
-  - Returns: Integer count of LOB objects stored
+- `for lob in lobts`: iterate over `LOB` objects in timestamp order (`__iter__`)
 
-- `lobts.len_ts`: Property returning time duration
-  - Returns: `last_timestamp - first_timestamp`
+- `lobts.get_at_timestamp(timestamp)`: alias for `lobts[timestamp]`
 
-- `len(lobts)`: Get number of snapshots (same as `lobts.len`)
+- `lobts.get_range(start_ts, end_ts)`: alias for `lobts[start_ts:end_ts]`
 
 ### LOB Properties (at specific timestamp)
-Access LOB properties via `lobts[timestamp]`:
-- `lobts[ts].bid`: Best bid price (indexable: `bid[0]`, `bid[1]`, ...)
-- `lobts[ts].ask`: Best ask price (indexable: `ask[0]`, `ask[1]`, ...)
-- `lobts[ts].bidq`: Best bid quantity (indexable)
-- `lobts[ts].askq`: Best ask quantity (indexable)
-- `lobts[ts].vi`: Volume imbalance (indexable: `vi[0]` for top level, `vi[i]` for top i levels)
-- `lobts[ts].spread`: Spread in absolute value
-- `lobts[ts].spread_tick`: Spread in ticks
-- `lobts[ts].spread_rel`: Spread as percentage of bid level
-- `lobts[ts].midprice`: Mid-price
-- `lobts[ts].vw_midprice`: Volume-weighted mid-price
-- `lobts[ts].check()`: Check book consistency (returns `True`/`False`)
+Access via `lobts[timestamp]` — returns a full `LOB` object (see [LOB docs](lob.md)):
+- `lobts[ts].bid`, `lobts[ts].ask`, `lobts[ts].bidq`, `lobts[ts].askq`, `lobts[ts].vi`
+- `lobts[ts].spread`, `lobts[ts].spread_tick`, `lobts[ts].spread_rel`
+- `lobts[ts].midprice`, `lobts[ts].vw_midprice`
+- `lobts[ts].check()`
 
 ### Time Series Statistics
-Properties returning pandas Series with timestamps as index:
+Properties returning pandas Series indexed by timestamp:
 
-- `lobts.spread`: Spread time series
-- `lobts.bid`: Best bid price time series
-- `lobts.ask`: Best ask price time series
-- `lobts.midprice`: Mid-price time series
-- `lobts.vw_midprice`: Volume-weighted mid-price time series
-- `lobts.vi`: Volume imbalance time series
+- `lobts.spread`: spread time series
+- `lobts.bid`: best bid price time series
+- `lobts.ask`: best ask price time series
+- `lobts.bidq`: best bid quantity time series
+- `lobts.askq`: best ask quantity time series
+- `lobts.midprice`: mid-price time series
+- `lobts.vw_midprice`: volume-weighted mid-price time series
+- `lobts.vi`: volume imbalance time series
 
-### Time-Based Statistics
-- `lobts.arrival_frequency`: Total order arrivals (L2 quantity-based)
-  - Counts quantity added to order book across all transitions
-  - Includes: new levels and quantity increases at existing levels
+**Lazy mode**: these are computed via a single C forward pass (`lobts_seq_extract_best`) — O(N + D).
+**Eager/latest mode**: iterates stored LOB objects.
 
-- `lobts.cancel_frequency`: Total order cancellations (L2 quantity-based)
-  - Counts quantity removed from order book across all transitions
-  - Includes: full cancellations (level→0) and partial cancellations (quantity decreases)
+### Order Book Activity
 
-- `lobts.update_frequency()`: Total updates (arrivals + cancellations)
-  - Returns: `arrival_frequency + cancel_frequency`
+**Volume** (total quantity moved):
+- `lobts.order_arrival_volume`: total quantity added to the book across all LOB transitions
+  - Counts new price levels (full quantity) and quantity increases at existing levels (delta only)
+- `lobts.order_cancel_volume`: total quantity removed from the book across all LOB transitions
+  - Counts full cancellations (level → 0) and partial size decreases
+- `lobts.update_volume()`: `order_arrival_volume + order_cancel_volume`
+
+**Frequency** (events per second, scaled by `timestamp_unit`):
+- `lobts.order_arrival_frequency`: arrival events per second (both sides)
+- `lobts.order_cancel_frequency`: cancel events per second (both sides)
+- `lobts.bid_order_arrival_frequency`: bid-side arrival events per second
+- `lobts.ask_order_arrival_frequency`: ask-side arrival events per second
+- `lobts.bid_order_cancel_frequency`: bid-side cancel events per second
+- `lobts.ask_order_cancel_frequency`: ask-side cancel events per second
+
+Each event is one price level that appeared, increased, disappeared, or decreased in quantity.
+
+**Order flow imbalance**:
+- `lobts.order_flow_imbalance`: `pd.Series` of OFI values indexed by transition timestamp
+  - `OFI(t) = (bid_arr_vol − bid_can_vol) − (ask_arr_vol − ask_can_vol)`
+  - Positive: bid side building faster than ask side (bullish pressure)
+  - Negative: ask side building faster (bearish pressure)
+  - One value per LOB transition (length = number of timestamps − 1)
 
 ### Utility Methods
-- `lobts.diff(other)`: Calculate differences between two LOBts
-  - `other`: Another LOBts object to compare with
-  - Returns: List of `(timestamp, bid_deltas, ask_deltas)` tuples
-  - Useful for comparing order book evolution
-
-- `lobts.get_at_timestamp(timestamp)`: Get LOB at specific timestamp
-  - Returns: `LOB` object or `None` if not found
-
-- `lobts.get_range(start_ts, end_ts)`: Get time range
-  - `start_ts`: Start timestamp (inclusive)
-  - `end_ts`: End timestamp (inclusive)
-  - Returns: New `LOBts` with filtered snapshots
+- `lobts.diff(other)`: calculate differences between two `LOBts`
+  - `other`: another `LOBts` object to compare with
+  - Returns: list of `(timestamp, bid_deltas, ask_deltas)` tuples
 
 ### Conversion Methods
-- `lobts.to_np(start_ts=None, end_ts=None)`: Export to numpy array
-  - `start_ts`, `end_ts`: Optional time range filter
-  - Returns: Array with shape `(n, 5)`: `[timestamp, side, level, price, size]`
+- `lobts.to_np(start_ts=None, end_ts=None)`: export to numpy array
+  - Returns: array with shape `(n, 5)` — `[timestamp, side, level, price, size]`
 
-- `lobts.to_pd(start_ts=None, end_ts=None)`: Export to pandas DataFrame
-  - `start_ts`, `end_ts`: Optional time range filter
+- `lobts.to_pd(start_ts=None, end_ts=None)`: export to pandas DataFrame
   - Returns: DataFrame with columns `['timestamp', 'side', 'level', 'price', 'size']`
 
-### Export Methods
-- `lobts.to_csv(path, start_ts=None, end_ts=None)`: Export to CSV file
-  - `path`: File path for CSV output
-  - `start_ts`, `end_ts`: Optional time range filter
-  - Saves entire time series with appropriate columns
-
-- `lobts.to_xlsx(path, start_ts=None, end_ts=None)`: Export to XLSX file
-  - `path`: File path for XLSX output
-  - `start_ts`, `end_ts`: Optional time range filter
-  - Saves entire time series with appropriate columns
-
-- `lobts.to_parquet(path, start_ts=None, end_ts=None)`: Export to Parquet file
-  - `path`: File path for Parquet output
-  - `start_ts`, `end_ts`: Optional time range filter
-  - Saves entire time series with appropriate columns
-  - Efficient binary format for large time series
+- `lobts.to_csv(path, start_ts=None, end_ts=None)`: export to CSV
+- `lobts.to_xlsx(path, start_ts=None, end_ts=None)`: export to XLSX
+- `lobts.to_parquet(path, start_ts=None, end_ts=None)`: export to Parquet
 
 ### L2 Order Book Semantics
-LOBts uses L2 (level 2) order book semantics for frequency calculations:
 
-**Arrival Frequency**: Counts quantity added to the book
-- New level arrival: full quantity at new price level
-- Quantity increase: difference when existing level grows (X → Y, where Y > X)
+All activity metrics use L2 (price-level) semantics. Individual order IDs are not tracked.
 
-**Cancel Frequency**: Counts quantity removed from the book
-- Full cancellation: complete quantity at removed level (X → 0)
-- Partial cancellation: difference when existing level shrinks (X → Y, where Y < X)
+**Arrival volume / events**: quantity added and price levels that grew
+- New level: full quantity counts as arrival volume; +1 arrival event
+- Quantity increase (X → Y, Y > X): delta `Y − X` counts as arrival volume; +1 arrival event
+
+**Cancel volume / events**: quantity removed and price levels that shrank
+- Full cancellation (X → 0 or level disappears): full `X` counts as cancel volume; +1 cancel event
+- Partial cancellation (X → Y, Y < X): delta `X − Y` counts as cancel volume; +1 cancel event
 
 Example:
 ```
 t=1000:  bid@100.00: 10
-t=1100:  bid@100.00: 7   (partial cancel: -3)
-t=1200:  bid@100.00: 15  (quantity increase: +8)
+t=1100:  bid@100.00: 7   → cancel_volume += 3,  cancel_event += 1
+t=1200:  bid@100.00: 15  → arrival_volume += 8, arrival_event += 1
 ```
-- Arrival from t=1000→1100: 0 (no increases)
-- Cancel from t=1000→1100: 3 (10→7)
-- Arrival from t=1100→1200: 8 (7→15)
+
+All activity properties are computed via a single `_iter_transitions()` forward pass backed by `_iter_seq_states()` (C-accelerated in lazy mode), so calling multiple properties is O(N) per call.

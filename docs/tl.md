@@ -89,6 +89,117 @@
   - `bucket_size=None`: computed once as `total_volume / 50` and reused across all windows
   - values near 0 indicate balanced order flow; values near 1 indicate strong directional (potentially informed) flow
 
+### Trade activity
+
+**Frequency** (trades per second, scaled by `timestamp_unit`):
+- `tl.trade_frequency`: all trades per second
+- `tl.ask_trade_frequency`: buy-aggressor trades per second — trades where `side='b'` (buyer hits the ask)
+- `tl.bid_trade_frequency`: sell-aggressor trades per second — trades where `side='s'` (seller hits the bid)
+
+**Volume imbalance**:
+- `tl.trade_volume_imbalance`: `(buy_vol − sell_vol) / (buy_vol + sell_vol)`, in `[−1, +1]`
+  - `+1`: all volume was buy-aggressor; `−1`: all volume was sell-aggressor
+  - Returns `0.0` if there are no trades
+
+**Order book activity** (on the underlying `LOBts` via `tl.lob`):
+- `tl.lob.order_arrival_volume`, `tl.lob.order_cancel_volume`: total quantity added/removed
+- `tl.lob.order_arrival_frequency`, `tl.lob.order_cancel_frequency`: events per second
+- `tl.lob.bid_order_arrival_frequency`, `tl.lob.ask_order_arrival_frequency`: per-side arrivals/sec
+- `tl.lob.bid_order_cancel_frequency`, `tl.lob.ask_order_cancel_frequency`: per-side cancels/sec
+- `tl.lob.order_flow_imbalance`: `pd.Series` of `OFI(t) = (bid_arr_vol − bid_can_vol) − (ask_arr_vol − ask_can_vol)` per LOB transition — see [LOBts docs](lobts.md) for full semantics
+
+### Kyle's lambda — `tl.kyle_lambda()`
+
+Price impact coefficient from the linear model `ΔP_mid = λ · Q_signed + α`, where `Q_signed = buy_volume − sell_volume` and `ΔP_mid` is the change in mid-price over the same interval. Fitted via OLS; zero-flow intervals are excluded.
+
+```python
+tl.kyle_lambda(interval=None, window_size=None)
+```
+
+| Param | Description |
+|---|---|
+| `interval` | `None` → one observation per consecutive LOB-update pair `(t₁, t₂)`: `Q_signed` = trades in `(t₁, t₂]`, `ΔP_mid = mid(t₂) − mid(t₁)` |
+| | `N` → non-overlapping fixed-width time buckets `[t, t+N)`: `Q_signed` = trades in bucket, `ΔP_mid = mid(t+N) − mid(t)`. `N` in same timestamp units as the TL |
+| `window_size` | `None` → scalar `λ` over all observations; `W` → rolling `pd.Series` indexed by observation end timestamps |
+
+**Returns**:
+- `float` when `window_size=None`; `nan` if fewer than 2 non-zero-flow observations
+- `pd.Series` indexed by observation end timestamps when `window_size=W`; empty Series if no observations
+
+**Interpretation**: a higher `λ` means a larger price move per unit of net signed volume — indicating thinner liquidity or stronger adverse selection. `λ ≈ 0` indicates price-insensitive order flow (e.g. liquidity-motivated trades).
+
+### Fill rate — `tl.fill_rate()`
+
+Fill probability for a passive limit order at each tick distance δ, using the empirical trade arrival rate.
+
+```python
+tl.fill_rate(holding_time, side='a', buckets=None)
+```
+
+**Model**: trade arrivals at distance δ are modelled as a Poisson process with rate λ̂(δ). Given a resting order at δ for `holding_time` timestamp units:
+
+```
+P(fill) = 1 − exp(−λ̂(δ) · holding_time)
+```
+
+λ̂(δ) = N(δ) / T(δ) — the same empirical intensity table as `tl.gueant.buckets()`, no model fitting required.
+
+| Param | Description |
+|---|---|
+| `holding_time` | order resting duration (same timestamp units as the TL) |
+| `side` | `'a'` (ask side — filled by buy-aggressor trades) or `'b'` (bid side — filled by sell-aggressor trades) |
+| `buckets` | optional list of δ thresholds to aggregate integer-δ bins (same as `tl.gueant.buckets()`) |
+
+**Returns**: `pd.DataFrame` with columns:
+
+| Column | Description |
+|---|---|
+| `delta` | tick distance from best quote |
+| `N` | number of observed trades at this δ |
+| `T` | total book-time (timestamp units) the book exposed liquidity at δ |
+| `lambda` | empirical arrival rate N/T; nan if no exposure or no trades |
+| `fill_rate` | P(fill within `holding_time`); nan where lambda is nan |
+
+**Notes:**
+- Fill rate increases monotonically with `holding_time` (longer resting → higher fill probability).
+- Inner levels (δ=0, 1) typically have high λ̂ and thus high fill rates; outer levels are near 0.
+- The formula assumes Poisson arrivals. Trade clustering (Hawkes-like) means real fill probability is slightly higher for short holding times and slightly lower for long ones compared to this estimate.
+
+### Hawkes process — `tl.hawkes()`
+
+Models **trade arrival** self-excitation: each execution increases the probability of subsequent trades, decaying exponentially. Fitted exclusively on trade timestamps (`tl.trades`). Order arrivals and cancellations (LOB-level events) are not modelled here.
+
+
+```
+λ(t) = μ + Σᵢ α · exp(−β · (t − tᵢ))
+```
+
+Fit via maximum likelihood (Ozaki recursive formula, O(N) per evaluation).
+
+```python
+tl.hawkes(side=None, window_size=None)
+```
+
+| Param | Description |
+|---|---|
+| `side` | `None` (all trades), `'b'` (buy-aggressors only), `'s'` (sell-aggressors only) |
+| `window_size` | `None` → scalar fit over all trades; `N` → rolling fit at each trade timestamp (N in same timestamp units as the TL) |
+
+**Returns** (scalar, `window_size=None`):
+dict with keys `'mu'`, `'alpha'`, `'beta'`, `'branching_ratio'`. All nan if fewer than 3 trades.
+
+**Returns** (rolling, `window_size=N`):
+`pd.DataFrame` with columns `['mu', 'alpha', 'beta', 'branching_ratio']` indexed by trade timestamps. Rows with fewer than 3 trades in the window contain nan.
+
+**Parameter units** — always SI (events/second for μ and α; 1/second for β), regardless of `timestamp_unit`.
+
+| Key | Meaning |
+|---|---|
+| `mu` | Baseline intensity (events/s) — background trade rate with no excitation |
+| `alpha` | Excitement jump (events/s) — how much each trade raises intensity |
+| `beta` | Decay rate (1/s) — how fast excitation fades; half-life = ln(2) / β |
+| `branching_ratio` | α / β — expected offspring per event; must be < 1 for stationarity |
+
 ### Guéant intensity function — `tl.gueant`
 Models trade arrival intensity as `λ(δ) = A · exp(−k · δ)`, where `δ` is the distance in ticks from best bid/ask.
 
@@ -110,7 +221,7 @@ Reference: Guéant, Lehalle, Fernandez-Tapia (2013).
     - bid side: `δ = (best_ask − trade_price) / tick_size`
 
 ### I/O
-- `from_parquet(path)`: load LOB and trade events from a Parquet file into this `TL` instance
+- `from_parquet(path, mode='lazy')`: load LOB and trade events from a Parquet file into this `TL` instance
   - expected columns: `timestamp`, `event_type`, `side`, `price`, `quantity`
   - `event_type` values:
     - `'book_level'`: rows forming a full LOB snapshot; all rows at the same timestamp form one snapshot
@@ -118,3 +229,6 @@ Reference: Guéant, Lehalle, Fernandez-Tapia (2013).
     - `'trade'`: individual trade events
   - `side` values: LOB rows use `'bid'`/`'ask'`; trade rows use `'buy'`/`'sell'`
   - within the same timestamp, processing order is: `book_level` → `book_update` → `trade`
+  - `mode`: `'lazy'` (default) or `'eager'`
+    - **`'lazy'`**: LOB data is loaded as checkpoints + a delta log (vectorised via pyarrow); `build_checkpoints()` is called automatically. Dramatically lower memory for large files.
+    - **`'eager'`**: every snapshot/update is expanded into a full `LobBook` in C memory immediately. Simpler but uses O(N × L) memory.

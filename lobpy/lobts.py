@@ -9,6 +9,7 @@ import numpy as np
 from lobpy._cext import ffi, lib
 
 from .lob import LOB, _get_sidebook_data, _levels_to_arrays, _make_ask_array, _make_bid_array
+from .ohlc import TS_UNITS as _TS_UNITS
 
 _LAZY_DELTA_DTYPE: np.dtype = np.dtype(
     [("ts", "i8"), ("side", "u1"), ("price", "f8"), ("qty", "f8")]
@@ -20,7 +21,7 @@ _AUTO_CHECKPOINTS = 100
 class LOBts:
     """Time series of LOB objects indexed by timestamp."""
 
-    def __init__(self, name=None, tick_size=1, mode="lazy") -> None:
+    def __init__(self, name=None, tick_size=1, mode="lazy", timestamp_unit="ns") -> None:
         """
         Initialize LOBts.
 
@@ -30,11 +31,13 @@ class LOBts:
             mode: 'lazy' (default) stores only checkpoints + delta log and reconstructs on demand,
                   'eager' stores all snapshots as full LobBook objects in C memory,
                   'latest' keeps only the most recent snapshot in C memory
+            timestamp_unit: Unit of all timestamps. One of 's', 'ms', 'us', 'ns'. Defaults to 'ns'.
         """
         if name is None:
             name = f"lobts{id(self)}"
         self.name = name
         self.tick_size = tick_size
+        self.timestamp_unit = timestamp_unit
         if mode not in ("lazy", "eager", "latest"):
             raise ValueError(
                 f"Unknown mode '{mode}'. Accepted: 'lazy' (default), 'eager', 'latest'."
@@ -49,6 +52,8 @@ class LOBts:
             self._cache: OrderedDict[int, LOB] = OrderedDict()
             self._ts_lo = None  # inclusive lower bound for timestamps view
             self._ts_hi = None  # inclusive upper bound for timestamps view
+            self._exchange_timestamps: np.ndarray = np.empty(0, dtype=np.int64)
+            self._sequences: np.ndarray = np.empty(0, dtype=np.int64)
         else:
             mode_int = 0 if mode == "eager" else 1  # LOBTS_DELTA=0, LOBTS_LATEST=1
             self._ptr = lib.lobts_create(name.encode(), float(tick_size), mode_int)
@@ -86,6 +91,20 @@ class LOBts:
             return []
         buf = ffi.buffer(ffi.cast("long long *", ts_pp[0]), n * 8)
         return np.frombuffer(buf, dtype=np.int64).copy().tolist()
+
+    @property
+    def exchange_timestamps(self):
+        """Return exchange timestamps aligned with timestamps."""
+        if self._mode == "lazy":
+            return self._exchange_timestamps
+        return np.empty(0, dtype=np.int64)
+
+    @property
+    def sequences(self):
+        """Return sequence IDs aligned with timestamps."""
+        if self._mode == "lazy":
+            return self._sequences
+        return np.empty(0, dtype=np.int64)
 
     # ------------------------------------------------------------------
     # Mutation
@@ -314,7 +333,12 @@ class LOBts:
             New LOBts with filtered data
         """
         if self._mode == "lazy":
-            result = LOBts(name=f"{self.name}_range", tick_size=self.tick_size, mode="lazy")
+            result = LOBts(
+                name=f"{self.name}_range",
+                tick_size=self.tick_size,
+                mode="lazy",
+                timestamp_unit=self.timestamp_unit,
+            )
 
             # Anchor: nearest checkpoint at or before start_ts
             if start_ts is not None and len(self._ckpt_ts) > 0:
@@ -348,6 +372,11 @@ class LOBts:
             result._ts_lo = start_ts
             result._ts_hi = end_ts
 
+            # Slice exchange_timestamps / sequences to the user-requested range
+            if len(self._exchange_timestamps) > 0:
+                result._exchange_timestamps = self._exchange_timestamps.copy()
+                result._sequences = self._sequences.copy()
+
             return result
 
         has_start = 1 if start_ts is not None else 0
@@ -364,6 +393,7 @@ class LOBts:
         result.tick_size = self.tick_size
         result._mode = self._mode
         result._ptr = new_ptr
+        result.timestamp_unit = self.timestamp_unit
         return result
 
     # ------------------------------------------------------------------
@@ -541,9 +571,11 @@ class LOBts:
                 lob_ptr = lib.lobts_get_at(self._ptr, i)
                 bids_arr = _get_sidebook_data(lob_ptr, lib.lob_get_bids)
                 asks_arr = _get_sidebook_data(lob_ptr, lib.lob_get_asks)
-                yield int(ts), {float(p): float(q) for p, q in bids_arr}, {
-                    float(p): float(q) for p, q in asks_arr
-                }
+                yield (
+                    int(ts),
+                    {float(p): float(q) for p, q in bids_arr},
+                    {float(p): float(q) for p, q in asks_arr},
+                )
             return
 
         # Lazy mode — delegate the forward pass to C.
@@ -1152,17 +1184,43 @@ class LOBts:
         """Return ask quantity time series as property."""
         return self.askq_ts()
 
-    @property
-    def vw_midprice(self):
-        """Return volume-weighted mid-price time series as property."""
+    def vw_midprice_ts(self, start_ts=None, end_ts=None):
+        """
+        Return volume-weighted mid-price time series.
+
+        Args:
+            start_ts: Start timestamp (inclusive)
+            end_ts: End timestamp (inclusive)
+
+        Returns:
+            pandas Series with timestamps as index and vw_midprice values
+        """
         try:
             import pandas as pd
         except ImportError:
             raise ImportError("pandas is required for time series methods")
 
+        if self._mode == "lazy":
+            ts_list, bids, asks, bidqs, askqs = self._seq_extract_best(start_ts, end_ts)
+            import math
+
+            vw_midprices = [
+                (
+                    (b * bq + a * aq) / (bq + aq)
+                    if not math.isnan(b) and not math.isnan(a) and (bq + aq) != 0
+                    else float("nan")
+                )
+                for b, a, bq, aq in zip(bids, asks, bidqs, askqs)
+            ]
+            return pd.Series(vw_midprices, index=ts_list, name="vw_midprice")
+
         vw_midprices = []
         timestamps = []
         for ts in self.timestamps:
+            if start_ts is not None and ts < start_ts:
+                continue
+            if end_ts is not None and ts > end_ts:
+                continue
             lob = self[ts]
             bid_price = lob.bid[0]
             bid_size = lob.bidq[0]
@@ -1181,16 +1239,41 @@ class LOBts:
         return pd.Series(vw_midprices, index=timestamps, name="vw_midprice")
 
     @property
-    def vi(self):
-        """Return volume imbalance time series as property."""
+    def vw_midprice(self):
+        """Return volume-weighted mid-price time series as property."""
+        return self.vw_midprice_ts()
+
+    def vi_ts(self, start_ts=None, end_ts=None):
+        """
+        Return volume imbalance time series.
+
+        Args:
+            start_ts: Start timestamp (inclusive)
+            end_ts: End timestamp (inclusive)
+
+        Returns:
+            pandas Series with timestamps as index and vi values
+        """
         try:
             import pandas as pd
         except ImportError:
             raise ImportError("pandas is required for time series methods")
 
+        if self._mode == "lazy":
+            ts_list, _, _, bidqs, askqs = self._seq_extract_best(start_ts, end_ts)
+
+            vi_values = [
+                (bq - aq) / (bq + aq) if (bq + aq) != 0 else 0.0 for bq, aq in zip(bidqs, askqs)
+            ]
+            return pd.Series(vi_values, index=ts_list, name="vi")
+
         vi_values = []
         timestamps = []
         for ts in self.timestamps:
+            if start_ts is not None and ts < start_ts:
+                continue
+            if end_ts is not None and ts > end_ts:
+                continue
             lob = self[ts]
             bid_size = lob.bidq[0]
             ask_size = lob.askq[0]
@@ -1203,82 +1286,266 @@ class LOBts:
         return pd.Series(vi_values, index=timestamps, name="vi")
 
     @property
-    def arrival_frequency(self):
+    def vi(self):
+        """Return volume imbalance time series as property."""
+        return self.vi_ts()
+
+    def _duration_seconds(self):
+        """Return timeline duration in seconds using the configured timestamp_unit."""
+        ts = self.len_ts
+        return ts / _TS_UNITS[self.timestamp_unit] if ts > 0 else 0.0
+
+    def _iter_transitions(self):
         """
-        Return total arrival frequency (quantity added to order book across all snapshots).
+        Yield per-LOB-transition statistics via a single forward pass.
 
-        In L2 order books, an arrival can be:
-        - New level: a price level that didn't exist before
-        - Quantity increase: existing level size increases (X -> Y where Y > X)
+        Yields:
+            (ts, bid_arr_vol, bid_can_vol, ask_arr_vol, ask_can_vol,
+                 bid_arr_cnt, bid_can_cnt, ask_arr_cnt, ask_can_cnt)
 
-        Returns total quantity added (positive changes) across all transitions.
+        *_vol: total quantity added/removed on that side.
+        *_cnt: number of price levels that arrived/cancelled on that side.
         """
-        timestamps_list = list(self.timestamps)
-        if len(timestamps_list) <= 1:
-            return 0
+        it = self._iter_seq_states()
+        try:
+            _, prev_bid, prev_ask = next(it)
+        except StopIteration:
+            return
+        for ts, curr_bid, curr_ask in it:
+            bid_arr_vol = bid_can_vol = 0.0
+            bid_arr_cnt = bid_can_cnt = 0
+            ask_arr_vol = ask_can_vol = 0.0
+            ask_arr_cnt = ask_can_cnt = 0
 
-        total_arrivals = 0
-        for i in range(1, len(timestamps_list)):
-            prev_lob = self[timestamps_list[i - 1]]
-            curr_lob = self[timestamps_list[i]]
+            for price, new_qty in curr_bid.items():
+                if price not in prev_bid:
+                    bid_arr_vol += new_qty
+                    bid_arr_cnt += 1
+                elif new_qty > prev_bid[price]:
+                    bid_arr_vol += new_qty - prev_bid[price]
+                    bid_arr_cnt += 1
 
-            prev_bid_dict = dict(prev_lob._bids)
-            prev_ask_dict = dict(prev_lob._asks)
+            for price, old_qty in prev_bid.items():
+                if price not in curr_bid:
+                    bid_can_vol += old_qty
+                    bid_can_cnt += 1
+                elif curr_bid[price] < old_qty:
+                    bid_can_vol += old_qty - curr_bid[price]
+                    bid_can_cnt += 1
 
-            for price, new_qty in curr_lob._bids:
-                if price not in prev_bid_dict:
-                    total_arrivals += new_qty
-                elif new_qty > prev_bid_dict[price]:
-                    total_arrivals += new_qty - prev_bid_dict[price]
+            for price, new_qty in curr_ask.items():
+                if price not in prev_ask:
+                    ask_arr_vol += new_qty
+                    ask_arr_cnt += 1
+                elif new_qty > prev_ask[price]:
+                    ask_arr_vol += new_qty - prev_ask[price]
+                    ask_arr_cnt += 1
 
-            for price, new_qty in curr_lob._asks:
-                if price not in prev_ask_dict:
-                    total_arrivals += new_qty
-                elif new_qty > prev_ask_dict[price]:
-                    total_arrivals += new_qty - prev_ask_dict[price]
+            for price, old_qty in prev_ask.items():
+                if price not in curr_ask:
+                    ask_can_vol += old_qty
+                    ask_can_cnt += 1
+                elif curr_ask[price] < old_qty:
+                    ask_can_vol += old_qty - curr_ask[price]
+                    ask_can_cnt += 1
 
-        return total_arrivals
+            prev_bid, prev_ask = curr_bid, curr_ask
+            yield (
+                ts,
+                bid_arr_vol,
+                bid_can_vol,
+                ask_arr_vol,
+                ask_can_vol,
+                bid_arr_cnt,
+                bid_can_cnt,
+                ask_arr_cnt,
+                ask_can_cnt,
+            )
 
     @property
-    def cancel_frequency(self):
+    def order_arrival_volume(self):
         """
-        Return total cancel frequency (quantity removed from order book across all snapshots).
+        Total quantity added to the order book across all LOB transitions.
 
-        In L2 order books, a cancel can be:
-        - Full cancel: level completely removed (size goes to X -> 0 or level disappears)
-        - Partial cancel: level size decreases (size goes from X -> Y where Y < X)
-
-        Returns total quantity removed (negative changes) across all transitions.
+        Counts new price levels and quantity increases on both sides.
         """
-        timestamps_list = list(self.timestamps)
-        if len(timestamps_list) <= 1:
-            return 0
+        return sum(r[1] + r[3] for r in self._iter_transitions())
 
-        total_cancels = 0
-        for i in range(1, len(timestamps_list)):
-            prev_lob = self[timestamps_list[i - 1]]
-            curr_lob = self[timestamps_list[i]]
+    @property
+    def order_cancel_volume(self):
+        """
+        Total quantity removed from the order book across all LOB transitions.
 
-            curr_bid_dict = dict(curr_lob._bids)
-            curr_ask_dict = dict(curr_lob._asks)
+        Counts full cancels and partial size decreases on both sides.
+        """
+        return sum(r[2] + r[4] for r in self._iter_transitions())
 
-            for price, old_qty in prev_lob._bids:
-                if price not in curr_bid_dict:
-                    total_cancels += old_qty
-                elif curr_bid_dict[price] < old_qty:
-                    total_cancels += old_qty - curr_bid_dict[price]
+    def update_volume(self):
+        """Total quantity changed in the order book (arrivals + cancels)."""
+        return self.order_arrival_volume + self.order_cancel_volume
 
-            for price, old_qty in prev_lob._asks:
-                if price not in curr_ask_dict:
-                    total_cancels += old_qty
-                elif curr_ask_dict[price] < old_qty:
-                    total_cancels += old_qty - curr_ask_dict[price]
+    @property
+    def order_arrival_frequency(self):
+        """
+        Order arrival events per second (both sides combined).
 
-        return total_cancels
+        Each price level that appears new or increases in quantity counts as one event.
+        """
+        dur = self._duration_seconds()
+        if dur == 0:
+            return 0.0
+        return sum(r[5] + r[7] for r in self._iter_transitions()) / dur
 
-    def update_frequency(self):
-        """Calculate update frequency (arrivals + cancels)."""
-        return self.arrival_frequency + self.cancel_frequency
+    @property
+    def order_cancel_frequency(self):
+        """
+        Order cancel events per second (both sides combined).
+
+        Each price level that disappears or decreases in quantity counts as one event.
+        """
+        dur = self._duration_seconds()
+        if dur == 0:
+            return 0.0
+        return sum(r[6] + r[8] for r in self._iter_transitions()) / dur
+
+    @property
+    def bid_order_arrival_frequency(self):
+        """Bid-side order arrival events per second."""
+        dur = self._duration_seconds()
+        if dur == 0:
+            return 0.0
+        return sum(r[5] for r in self._iter_transitions()) / dur
+
+    @property
+    def ask_order_arrival_frequency(self):
+        """Ask-side order arrival events per second."""
+        dur = self._duration_seconds()
+        if dur == 0:
+            return 0.0
+        return sum(r[7] for r in self._iter_transitions()) / dur
+
+    @property
+    def bid_order_cancel_frequency(self):
+        """Bid-side order cancel events per second."""
+        dur = self._duration_seconds()
+        if dur == 0:
+            return 0.0
+        return sum(r[6] for r in self._iter_transitions()) / dur
+
+    @property
+    def ask_order_cancel_frequency(self):
+        """Ask-side order cancel events per second."""
+        dur = self._duration_seconds()
+        if dur == 0:
+            return 0.0
+        return sum(r[8] for r in self._iter_transitions()) / dur
+
+    def _ofi_from_deltas(self):
+        """
+        Compute OFI directly from the delta log (lazy mode only).
+
+        Maintains bid/ask price→qty maps in a single forward pass over deltas,
+        grouping by timestamp. At each timestamp, computes:
+            OFI = (bid_arr - bid_can) - (ask_arr - ask_can)
+
+        Returns:
+            tuple of (timestamps: list[int], ofi_values: list[float])
+        """
+        # Initial state from earliest checkpoint, if any
+        bid_state = {}
+        ask_state = {}
+        ckpt_ts = self._ckpt_ts
+        n_ckpts = len(ckpt_ts)
+        first_ckpt_ts = int(ckpt_ts[0]) if n_ckpts > 0 else None
+
+        if first_ckpt_ts is not None:
+            bids_arr, asks_arr = self._ckpts[first_ckpt_ts]
+            for p, q in bids_arr:
+                bid_state[float(p)] = float(q)
+            for p, q in asks_arr:
+                ask_state[float(p)] = float(q)
+
+        deltas = self._delta_log
+        n_d = len(deltas)
+        if n_d == 0:
+            return [], []
+
+        # Find starting point: only process deltas at or after first checkpoint
+        start_idx = 0
+        if first_ckpt_ts is not None:
+            start_idx = int(np.searchsorted(deltas["ts"], first_ckpt_ts, side="left"))
+
+        timestamps = []
+        ofi_vals = []
+
+        i = start_idx
+        while i < n_d:
+            ts = int(deltas["ts"][i])
+            bid_arr = bid_can = 0.0
+            ask_arr = ask_can = 0.0
+
+            # Process all deltas at this timestamp
+            while i < n_d and int(deltas["ts"][i]) == ts:
+                side = deltas["side"][i]
+                price = float(deltas["price"][i])
+                new_qty = float(deltas["qty"][i])
+
+                if side == 0:  # bid
+                    old_qty = bid_state.get(price, 0.0)
+                    if new_qty > old_qty:
+                        bid_arr += new_qty - old_qty
+                    elif new_qty < old_qty:
+                        bid_can += old_qty - new_qty
+                    if new_qty > 0.0:
+                        bid_state[price] = new_qty
+                    else:
+                        bid_state.pop(price, None)
+                else:  # ask
+                    old_qty = ask_state.get(price, 0.0)
+                    if new_qty > old_qty:
+                        ask_arr += new_qty - old_qty
+                    elif new_qty < old_qty:
+                        ask_can += old_qty - new_qty
+                    if new_qty > 0.0:
+                        ask_state[price] = new_qty
+                    else:
+                        ask_state.pop(price, None)
+
+                i += 1
+
+            timestamps.append(ts)
+            ofi_vals.append((bid_arr - bid_can) - (ask_arr - ask_can))
+
+        return timestamps, ofi_vals
+
+    @property
+    def order_flow_imbalance(self):
+        """
+        Order flow imbalance (OFI) time series.
+
+        OFI(t) = (bid_arrival_vol − bid_cancel_vol) − (ask_arrival_vol − ask_cancel_vol)
+
+        Positive values indicate the bid side is building faster than the ask side
+        (bullish pressure). Negative values indicate ask-side dominance (bearish).
+
+        Returns:
+            pd.Series indexed by LOB transition timestamps.
+        """
+        try:
+            import pandas as pd
+        except ImportError:
+            raise ImportError("pandas is required for order_flow_imbalance")
+
+        if self._mode == "lazy":
+            ts_vals, ofi_vals = self._ofi_from_deltas()
+            return pd.Series(ofi_vals, index=ts_vals, name="ofi")
+
+        timestamps = []
+        ofi = []
+        for ts, bav, bcv, aav, acv, *_ in self._iter_transitions():
+            timestamps.append(ts)
+            ofi.append((bav - bcv) - (aav - acv))
+        return pd.Series(ofi, index=timestamps, name="ofi")
 
     def diff(self, other):
         """

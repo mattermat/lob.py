@@ -38,6 +38,9 @@ setup(
     ],
     python_requires=">=3.8",
     keywords="limit order book lob trading finance",
+    entry_points={
+        "console_scripts": ["lobpy=lobpy.cli:main"],
+    },
     project_urls={
         "Bug Reports": "https://github.com/mattermat/lob.py/issues",
         "Source": "https://github.com/mattermat/lob.py",

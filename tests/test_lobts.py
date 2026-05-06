@@ -270,7 +270,10 @@ class TestLOBtsProperties:
         lobts.set_snapshot([(100, 10)], [(101, 8)], timestamp=1000)
 
         lob = lobts[1000]
-        assert lob.spread_rel == 0.01
+        expected_spread = abs(100 - 101)
+        mid_price = (100 + 101) / 2
+        expected_spread_rel = expected_spread / mid_price
+        assert lob.spread_rel == expected_spread_rel
 
     def test_midprice_at_timestamp(self):
         """Test getting mid-price at timestamp."""
@@ -377,26 +380,24 @@ class TestLOBtsStats:
 class TestLOBtsTimeStats:
     """Test time-based statistics."""
 
-    def test_arrival_frequency(self):
-        """Test calculating order arrival frequency (L2 quantity-based)."""
+    def test_order_arrival_volume(self):
+        """Test order_arrival_volume (total quantity added across all LOB transitions)."""
         lobts = LOBts()
 
         lobts.set_snapshot([(100, 10)], [(101, 8)], timestamp=1000)
         lobts.set_snapshot([(100, 12), (99, 5)], [(101, 8)], timestamp=1100)
         lobts.set_snapshot([(100, 12), (99, 8)], [(101, 10)], timestamp=1200)
 
-        freq = lobts.arrival_frequency
-        assert freq is not None
-        assert freq > 0
+        vol = lobts.order_arrival_volume
+        assert vol is not None
+        assert vol > 0
 
-    def test_arrival_frequency_quantity_increases(self):
-        """Test arrival frequency includes quantity increases at existing levels."""
+    def test_order_arrival_volume_quantity_increases(self):
+        """Test order_arrival_volume includes quantity increases at existing levels."""
         lobts = LOBts(tick_size=0.01)
 
-        # Initial state
         lobts.set_snapshot(bids=[(100.00, 10), (99.50, 5)], asks=[(100.50, 8)], timestamp=1000)
 
-        # New levels + quantity increases
         lobts.set_updates(
             [
                 ("b", 100.00, 15),  # QUANTITY INCREASE: 10 -> 15 (+5)
@@ -408,60 +409,58 @@ class TestLOBtsTimeStats:
         )
 
         # Total arrivals: 5 + 3 + 2 + 2 = 12
-        assert lobts.arrival_frequency == 12
+        assert lobts.order_arrival_volume == 12
 
-    def test_arrival_frequency_by_side(self):
-        """Test calculating arrival frequency per side."""
+    def test_order_arrival_volume_by_side(self):
+        """Test order_arrival_volume accounts for both sides."""
         lobts = LOBts()
 
         lobts.set_snapshot([(100, 10)], [(101, 8)], timestamp=1000)
         lobts.set_snapshot([(100, 10)], [(101, 8)], timestamp=1100)
 
-        freq = lobts.arrival_frequency
-        assert freq is not None
+        vol = lobts.order_arrival_volume
+        assert vol is not None
 
-    def test_arrival_frequency_with_window(self):
-        """Test calculating arrival frequency with window parameter."""
+    def test_order_arrival_volume_with_multiple_snapshots(self):
+        """Test order_arrival_volume across multiple snapshots."""
         lobts = LOBts()
 
         for i in range(10):
             lobts.set_snapshot([(100, 10)], [(101, 8)], timestamp=1000 + i * 100)
 
-        freq = lobts.arrival_frequency
-        assert freq is not None
+        vol = lobts.order_arrival_volume
+        assert vol is not None
 
-    def test_cancel_frequency(self):
-        """Test calculating order cancel frequency (L2 quantity-based)."""
+    def test_order_cancel_volume(self):
+        """Test order_cancel_volume (total quantity removed across all LOB transitions)."""
         lobts = LOBts()
 
         lobts.set_snapshot([(100, 10)], [(101, 8)], timestamp=1000)
         lobts.set_updates([("b", 100, 0)], timestamp=1100)
 
-        freq = lobts.cancel_frequency
-        assert freq is not None
-        assert freq > 0
+        vol = lobts.order_cancel_volume
+        assert vol is not None
+        assert vol > 0
 
-    def test_cancel_frequency_with_window(self):
-        """Test calculating cancel frequency with window parameter."""
+    def test_order_cancel_volume_with_multiple_updates(self):
+        """Test order_cancel_volume across multiple cancel events."""
         lobts = LOBts()
 
         lobts.set_snapshot([(100, 10)], [(101, 8)], timestamp=1000)
         lobts.set_updates([("b", 100, 0)], timestamp=1100)
         lobts.set_updates([("b", 99, 0)], timestamp=1200)
 
-        freq = lobts.cancel_frequency
-        assert freq is not None
+        vol = lobts.order_cancel_volume
+        assert vol is not None
 
-    def test_cancel_frequency_partial_cancels(self):
-        """Test cancel frequency includes partial size decreases (L2 book semantics)."""
+    def test_order_cancel_volume_partial_cancels(self):
+        """Test order_cancel_volume includes partial size decreases (L2 book semantics)."""
         lobts = LOBts(tick_size=0.01)
 
-        # Initial state
         lobts.set_snapshot(
             bids=[(100.00, 10), (99.50, 5)], asks=[(100.50, 8), (101.00, 4)], timestamp=1000
         )
 
-        # Partial cancel + full cancel + arrival
         lobts.set_updates(
             [
                 ("b", 100.00, 7),  # PARTIAL: 10 -> 7 (decrease of 3)
@@ -472,7 +471,6 @@ class TestLOBtsTimeStats:
             timestamp=1100,
         )
 
-        # More cancels
         lobts.set_updates(
             [
                 ("b", 98.50, 0),  # FULL: 3 -> 0 (decrease of 3)
@@ -481,7 +479,57 @@ class TestLOBtsTimeStats:
         )
 
         # Total cancels: 3+5+3 (t=1100) + 3 (t=1200) = 14
-        assert lobts.cancel_frequency == 14
+        assert lobts.order_cancel_volume == 14
+
+    def test_order_arrival_frequency(self):
+        """Test order_arrival_frequency returns events per second."""
+        lobts = LOBts(timestamp_unit="ns")
+
+        lobts.set_snapshot([(100, 10)], [(101, 8)], timestamp=0)
+        lobts.set_updates([("b", 99, 5), ("a", 102, 3)], timestamp=1_000_000_000)  # 1 second later
+
+        freq = lobts.order_arrival_frequency
+        assert freq is not None
+        assert freq > 0
+
+    def test_bid_ask_order_arrival_frequency(self):
+        """Test bid and ask order arrival frequencies sum to total."""
+        lobts = LOBts(timestamp_unit="ns")
+
+        lobts.set_snapshot([(100, 10)], [(101, 8)], timestamp=0)
+        lobts.set_updates([("b", 99, 5), ("a", 102, 3)], timestamp=1_000_000_000)
+
+        total = lobts.order_arrival_frequency
+        bid_freq = lobts.bid_order_arrival_frequency
+        ask_freq = lobts.ask_order_arrival_frequency
+        assert abs(bid_freq + ask_freq - total) < 1e-9
+
+    def test_bid_ask_order_cancel_frequency(self):
+        """Test bid and ask order cancel frequencies sum to total."""
+        lobts = LOBts(timestamp_unit="ns")
+
+        lobts.set_snapshot([(100, 10), (99, 5)], [(101, 8), (102, 3)], timestamp=0)
+        lobts.set_updates([("b", 100, 0), ("a", 101, 0)], timestamp=1_000_000_000)
+
+        total = lobts.order_cancel_frequency
+        bid_freq = lobts.bid_order_cancel_frequency
+        ask_freq = lobts.ask_order_cancel_frequency
+        assert abs(bid_freq + ask_freq - total) < 1e-9
+
+    def test_order_flow_imbalance_series(self):
+        """Test order_flow_imbalance returns a pd.Series indexed by timestamp."""
+        lobts = LOBts()
+
+        lobts.set_snapshot([(100, 10)], [(101, 8)], timestamp=1000)
+        lobts.set_updates([("b", 99, 5)], timestamp=1100)  # bid grows → positive OFI
+        lobts.set_updates([("a", 102, 3)], timestamp=1200)  # ask grows → negative OFI
+
+        ofi = lobts.order_flow_imbalance
+        assert isinstance(ofi, __import__("pandas").Series)
+        assert len(ofi) == 2
+        assert ofi.index[0] == 1100
+        assert ofi.iloc[0] > 0  # bid arrival only → positive
+        assert ofi.iloc[1] < 0  # ask arrival only → negative
 
 
 class TestLOBtsConversion:

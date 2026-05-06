@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -2488,27 +2489,34 @@ class TestTLIntegration:
             assert trade.timestamp == 1350
 
 
-def _make_parquet(tmp_path, rows):
-    """Helper: write a list of (timestamp, event_type, side, price, quantity) to parquet."""
-    schema = pa.schema(
-        [
-            pa.field("timestamp", pa.int64()),
-            pa.field("event_type", pa.string()),
-            pa.field("side", pa.string()),
-            pa.field("price", pa.float64()),
-            pa.field("quantity", pa.float64()),
-        ]
-    )
-    table = pa.Table.from_pydict(
-        {
-            "timestamp": [r[0] for r in rows],
-            "event_type": [r[1] for r in rows],
-            "side": [r[2] for r in rows],
-            "price": [r[3] for r in rows],
-            "quantity": [r[4] for r in rows],
-        },
-        schema=schema,
-    )
+def _make_parquet(tmp_path, rows, exchange_timestamps=None, sequences=None):
+    """Helper: write rows to parquet.
+
+    rows: list of (timestamp, event_type, side, price, quantity)
+    exchange_timestamps: optional list of int64, same length as rows
+    sequences: optional list of int64, same length as rows
+    """
+    fields = [
+        pa.field("timestamp", pa.int64()),
+        pa.field("event_type", pa.string()),
+        pa.field("side", pa.string()),
+        pa.field("price", pa.float64()),
+        pa.field("quantity", pa.float64()),
+    ]
+    data = {
+        "timestamp": [r[0] for r in rows],
+        "event_type": [r[1] for r in rows],
+        "side": [r[2] for r in rows],
+        "price": [r[3] for r in rows],
+        "quantity": [r[4] for r in rows],
+    }
+    if exchange_timestamps is not None:
+        fields.append(pa.field("exchange_timestamp", pa.int64()))
+        data["exchange_timestamp"] = exchange_timestamps
+    if sequences is not None:
+        fields.append(pa.field("sequence", pa.int64()))
+        data["sequence"] = sequences
+    table = pa.Table.from_pydict(data, schema=pa.schema(fields))
     path = tmp_path / "events.parquet"
     pq.write_table(table, path)
     return path
@@ -2598,3 +2606,301 @@ class TestTLFromParquet:
 
         with pytest.raises(ValueError, match="Unknown mode"):
             tl.from_parquet(path, mode="invalid")
+
+
+class TestTLExchangeTimestamps:
+    def test_lazy_exchange_timestamps_lob_only(self, tmp_path):
+        rows = [
+            (1000, "book_level", "bid", 100.0, 5.0),
+            (1000, "book_level", "ask", 101.0, 3.0),
+            (1100, "book_update", "bid", 100.0, 8.0),
+        ]
+        exch_ts = [900, 900, 1000]
+        seqs = [900, 900, 1000]
+        path = _make_parquet(tmp_path, rows, exchange_timestamps=exch_ts, sequences=seqs)
+        tl = TL()
+        tl.from_parquet(path, mode="lazy")
+        np.testing.assert_array_equal(tl.exchange_timestamps, np.array([900, 1000], dtype=np.int64))
+        np.testing.assert_array_equal(tl.sequences, np.array([900, 1000], dtype=np.int64))
+
+    def test_eager_exchange_timestamps_lob_only(self, tmp_path):
+        rows = [
+            (1000, "book_level", "bid", 100.0, 5.0),
+            (1000, "book_level", "ask", 101.0, 3.0),
+            (1100, "book_update", "bid", 100.0, 8.0),
+        ]
+        exch_ts = [900, 900, 1000]
+        seqs = [900, 900, 1000]
+        path = _make_parquet(tmp_path, rows, exchange_timestamps=exch_ts, sequences=seqs)
+        tl = TL()
+        tl.from_parquet(path, mode="eager")
+        np.testing.assert_array_equal(tl.exchange_timestamps, np.array([900, 1000], dtype=np.int64))
+        np.testing.assert_array_equal(tl.sequences, np.array([900, 1000], dtype=np.int64))
+
+    def test_lazy_exchange_timestamps_with_trades(self, tmp_path):
+        rows = [
+            (1000, "book_level", "bid", 100.0, 5.0),
+            (1000, "book_level", "ask", 101.0, 3.0),
+            (1100, "trade", "buy", 101.0, 1.0),
+            (1200, "book_update", "bid", 100.0, 7.0),
+            (1300, "trade", "sell", 100.0, 0.5),
+        ]
+        exch_ts = [900, 900, 1050, 1100, 1250]
+        seqs = [900, 900, 1050, 1100, 1250]
+        path = _make_parquet(tmp_path, rows, exchange_timestamps=exch_ts, sequences=seqs)
+        tl = TL()
+        tl.from_parquet(path, mode="lazy")
+        np.testing.assert_array_equal(
+            tl.exchange_timestamps, np.array([900, 1050, 1100, 1250], dtype=np.int64)
+        )
+        np.testing.assert_array_equal(
+            tl.sequences, np.array([900, 1050, 1100, 1250], dtype=np.int64)
+        )
+
+    def test_eager_exchange_timestamps_with_trades(self, tmp_path):
+        rows = [
+            (1000, "book_level", "bid", 100.0, 5.0),
+            (1000, "book_level", "ask", 101.0, 3.0),
+            (1100, "trade", "buy", 101.0, 1.0),
+            (1200, "book_update", "bid", 100.0, 7.0),
+            (1300, "trade", "sell", 100.0, 0.5),
+        ]
+        exch_ts = [900, 900, 1050, 1100, 1250]
+        seqs = [900, 900, 1050, 1100, 1250]
+        path = _make_parquet(tmp_path, rows, exchange_timestamps=exch_ts, sequences=seqs)
+        tl = TL()
+        tl.from_parquet(path, mode="eager")
+        np.testing.assert_array_equal(
+            tl.exchange_timestamps, np.array([900, 1050, 1100, 1250], dtype=np.int64)
+        )
+        np.testing.assert_array_equal(
+            tl.sequences, np.array([900, 1050, 1100, 1250], dtype=np.int64)
+        )
+
+    def test_no_exchange_timestamps_returns_empty(self, tmp_path):
+        rows = [
+            (1000, "book_level", "bid", 100.0, 5.0),
+            (1000, "book_level", "ask", 101.0, 3.0),
+        ]
+        path = _make_parquet(tmp_path, rows)
+        tl = TL()
+        tl.from_parquet(path, mode="lazy")
+        assert len(tl.exchange_timestamps) == 0
+        assert len(tl.sequences) == 0
+
+    def test_lobts_exchange_timestamps(self, tmp_path):
+        rows = [
+            (1000, "book_level", "bid", 100.0, 5.0),
+            (1000, "book_level", "ask", 101.0, 3.0),
+            (1100, "book_update", "bid", 100.0, 8.0),
+        ]
+        exch_ts = [900, 900, 1000]
+        seqs = [900, 900, 1000]
+        path = _make_parquet(tmp_path, rows, exchange_timestamps=exch_ts, sequences=seqs)
+        tl = TL()
+        tl.from_parquet(path, mode="lazy")
+        np.testing.assert_array_equal(
+            tl.lob.exchange_timestamps, np.array([900, 1000], dtype=np.int64)
+        )
+        np.testing.assert_array_equal(tl.lob.sequences, np.array([900, 1000], dtype=np.int64))
+
+    def test_exchange_timestamps_not_unique(self, tmp_path):
+        rows = [
+            (1000, "book_level", "bid", 100.0, 5.0),
+            (1000, "book_level", "ask", 101.0, 3.0),
+            (1100, "book_update", "bid", 100.0, 8.0),
+            (1200, "trade", "buy", 101.0, 1.0),
+        ]
+        exch_ts = [900, 900, 900, 900]
+        seqs = [10, 10, 20, 30]
+        path = _make_parquet(tmp_path, rows, exchange_timestamps=exch_ts, sequences=seqs)
+        tl = TL()
+        tl.from_parquet(path, mode="lazy")
+        np.testing.assert_array_equal(
+            tl.exchange_timestamps, np.array([900, 900, 900], dtype=np.int64)
+        )
+        np.testing.assert_array_equal(tl.sequences, np.array([10, 20, 30], dtype=np.int64))
+
+
+class TestTLFillRate:
+    """Tests for TL.fill_rate()."""
+
+    def _make_tl(self):
+        """TL with a simple two-snapshot LOB and trades at multiple distances."""
+        tl = TL(tick_size=1, timestamp_unit="ns")
+        # Snapshot 1: best bid=100, best ask=101
+        tl.add_lob_snapshot(
+            1000,
+            bids=[(100, 10), (99, 5), (98, 3)],
+            asks=[(101, 8), (102, 4), (103, 2)],
+        )
+        # Trade at ask best (delta=1 from bid): buy aggressor at 101
+        tl.add_trade(1100, "b", 101.0, 2.0)
+        # Trade at delta=2 from bid (ask at 102)
+        tl.add_trade(1200, "b", 102.0, 1.0)
+        # Snapshot 2 (for book-time computation)
+        tl.add_lob_snapshot(
+            2000,
+            bids=[(100, 10), (99, 5)],
+            asks=[(101, 6), (102, 4)],
+        )
+        return tl
+
+    def test_returns_dataframe_with_required_columns(self):
+        tl = self._make_tl()
+        df = tl.fill_rate(holding_time=500)
+        assert isinstance(df, __import__("pandas").DataFrame)
+        assert set(df.columns) >= {"delta", "lambda", "fill_rate"}
+
+    def test_fill_rate_between_zero_and_one(self):
+        tl = self._make_tl()
+        df = tl.fill_rate(holding_time=500)
+        valid = df["fill_rate"].dropna()
+        assert (valid >= 0.0).all()
+        assert (valid <= 1.0).all()
+
+    def test_longer_holding_time_gives_higher_fill_rate(self):
+        tl = self._make_tl()
+        df_short = tl.fill_rate(holding_time=100)
+        df_long = tl.fill_rate(holding_time=10_000)
+        valid_short = df_short["fill_rate"].dropna()
+        valid_long = df_long["fill_rate"].dropna()
+        # Every valid fill_rate with the longer window must be >= the shorter one
+        assert (valid_long.values >= valid_short.values - 1e-12).all()
+
+    def test_zero_holding_time_gives_zero_fill_rate(self):
+        tl = self._make_tl()
+        df = tl.fill_rate(holding_time=0)
+        valid = df["fill_rate"].dropna()
+        assert (valid.abs() < 1e-12).all()
+
+    def test_side_ask_uses_buy_aggressor_trades(self):
+        tl = self._make_tl()
+        df = tl.fill_rate(holding_time=1000, side="a")
+        # At least one row should have a non-nan fill_rate (trades exist on ask side)
+        assert df["fill_rate"].notna().any()
+
+    def test_side_bid_returns_dataframe(self):
+        tl = self._make_tl()
+        df = tl.fill_rate(holding_time=1000, side="b")
+        assert isinstance(df, __import__("pandas").DataFrame)
+
+    def test_fill_rate_nan_where_lambda_nan(self):
+        tl = self._make_tl()
+        df = tl.fill_rate(holding_time=500)
+        nan_lambda = df["lambda"].isna()
+        assert df.loc[nan_lambda, "fill_rate"].isna().all()
+
+    def test_buckets_parameter_aggregates_deltas(self):
+        tl = self._make_tl()
+        df_raw = tl.fill_rate(holding_time=500)
+        df_bucketed = tl.fill_rate(holding_time=500, buckets=[1, 3, 10])
+        # Bucketed result has at most len(buckets)+1 rows (bins + possible overflow)
+        assert len(df_bucketed) <= len([1, 3, 10]) + 1
+        # Unbucketed has one row per integer delta
+        assert len(df_raw) >= len(df_bucketed)
+
+
+# ---------------------------------------------------------------------------
+# TestTLKyleLambda
+# ---------------------------------------------------------------------------
+
+
+class TestTLKyleLambda:
+    """Tests for TL.kyle_lambda()."""
+
+    @staticmethod
+    def _make_tl():
+        """
+        TL with 5 LOB snapshots and alternating buy/sell trades.
+        Midprice rises after buy flow and falls after sell flow so lambda > 0.
+        """
+        tl = TL(name="kl_test", tick_size=1, timestamp_unit="s")
+        # snapshot at t=0: mid = 100.5
+        tl.add_lob_snapshot(0, [(100, 10)], [(101, 10)])
+        # buy trade at t=1 then midprice rises
+        tl.add_trade(1, "b", 101.0, 5.0)
+        tl.add_lob_snapshot(2, [(101, 10)], [(102, 10)])  # mid=101.5
+        # buy trade at t=3
+        tl.add_trade(3, "b", 102.0, 3.0)
+        tl.add_lob_snapshot(4, [(102, 10)], [(103, 10)])  # mid=102.5
+        # sell trade at t=5 then midprice falls
+        tl.add_trade(5, "s", 102.0, 4.0)
+        tl.add_lob_snapshot(6, [(101, 10)], [(102, 10)])  # mid=101.5
+        # sell trade at t=7
+        tl.add_trade(7, "s", 101.0, 2.0)
+        tl.add_lob_snapshot(8, [(100, 10)], [(101, 10)])  # mid=100.5
+        return tl
+
+    def test_scalar_interval_none_returns_float(self):
+        tl = self._make_tl()
+        result = tl.kyle_lambda()
+        assert isinstance(result, float)
+
+    def test_scalar_interval_none_positive(self):
+        """Buy pressure → price goes up → lambda > 0."""
+        tl = self._make_tl()
+        lam = tl.kyle_lambda()
+        assert not np.isnan(lam)
+        assert lam > 0.0
+
+    def test_scalar_interval_fixed_returns_float(self):
+        tl = self._make_tl()
+        result = tl.kyle_lambda(interval=2)
+        assert isinstance(result, float)
+
+    def test_scalar_interval_fixed_positive(self):
+        tl = self._make_tl()
+        lam = tl.kyle_lambda(interval=2)
+        assert not np.isnan(lam)
+        assert lam > 0.0
+
+    def test_rolling_interval_none_returns_series(self):
+        tl = self._make_tl()
+        result = tl.kyle_lambda(window_size=4)
+        assert isinstance(result, pd.Series)
+
+    def test_rolling_interval_none_index_dtype(self):
+        tl = self._make_tl()
+        s = tl.kyle_lambda(window_size=4)
+        assert len(s) > 0
+        assert s.index.dtype == np.int64 or np.issubdtype(s.index.dtype, np.integer)
+
+    def test_rolling_interval_fixed_returns_series(self):
+        tl = self._make_tl()
+        result = tl.kyle_lambda(interval=2, window_size=6)
+        assert isinstance(result, pd.Series)
+
+    def test_no_trades_returns_nan_scalar(self):
+        tl = TL(timestamp_unit="s")
+        tl.add_lob_snapshot(0, [(100, 10)], [(101, 10)])
+        tl.add_lob_snapshot(1, [(100, 10)], [(101, 10)])
+        result = tl.kyle_lambda()
+        assert np.isnan(result)
+
+    def test_no_trades_returns_empty_series(self):
+        tl = TL(timestamp_unit="s")
+        tl.add_lob_snapshot(0, [(100, 10)], [(101, 10)])
+        tl.add_lob_snapshot(1, [(100, 10)], [(101, 10)])
+        result = tl.kyle_lambda(window_size=1)
+        assert isinstance(result, pd.Series)
+        assert len(result) == 0
+
+    def test_all_zero_flow_returns_nan(self):
+        """All intervals have zero signed flow → OLS has no data → nan."""
+        tl = TL(timestamp_unit="s")
+        # Equal buy and sell at each step: net Q = 0 per interval
+        for i in range(5):
+            tl.add_lob_snapshot(i * 2, [(100, 10)], [(101, 10)])
+            tl.add_trade(i * 2 + 1, "b", 101.0, 1.0)
+            tl.add_trade(i * 2 + 1, "s", 100.0, 1.0)
+        tl.add_lob_snapshot(10, [(100, 10)], [(101, 10)])
+        result = tl.kyle_lambda()
+        assert np.isnan(result)
+
+    def test_insufficient_lob_returns_nan(self):
+        tl = TL(timestamp_unit="s")
+        tl.add_lob_snapshot(0, [(100, 10)], [(101, 10)])
+        tl.add_trade(1, "b", 101.0, 1.0)
+        result = tl.kyle_lambda()
+        assert np.isnan(result)

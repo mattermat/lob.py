@@ -64,9 +64,16 @@ class TL:
         self.update_type = update_type
         self.timestamp_unit = timestamp_unit
         _lobts_mode = "latest" if lob_mode == "snapshot" else "lazy"
-        self._lobts = LOBts(name=name, tick_size=tick_size, mode=_lobts_mode)
+        self._lobts = LOBts(
+            name=name,
+            tick_size=tick_size,
+            mode=_lobts_mode,
+            timestamp_unit=timestamp_unit,
+        )
         self._ptr_trades = lib.trades_create()
         self._trades_cache = None  # invalidated on mutation, rebuilt lazily
+        self._exchange_timestamps: np.ndarray = np.empty(0, dtype=np.int64)
+        self._sequences: np.ndarray = np.empty(0, dtype=np.int64)
 
     def __del__(self):
         ptr = getattr(self, "_ptr_trades", None)
@@ -236,6 +243,16 @@ class TL:
         ts = sorted(set(self._lobts.timestamps) | {t.timestamp for t in self.trades})
         return ts
 
+    @property
+    def exchange_timestamps(self):
+        """Return exchange timestamps as ndarray, aligned with timestamps."""
+        return self._exchange_timestamps
+
+    @property
+    def sequences(self):
+        """Return sequence IDs as ndarray, aligned with timestamps."""
+        return self._sequences
+
     def rolling(self, window_size):
         """
         Yield TL slices over a rolling window.
@@ -355,6 +372,296 @@ class TL:
             rolling_items=self._rolling_trades_iter,
         )
 
+    def _duration_seconds(self):
+        """Return timeline duration in seconds using the configured timestamp_unit."""
+        ts = self.timestamps
+        if len(ts) < 2:
+            return 0.0
+        return (ts[-1] - ts[0]) / _TS_UNITS[self.timestamp_unit]
+
+    @property
+    def trade_frequency(self):
+        """Total trades per second over the full timeline."""
+        dur = self._duration_seconds()
+        if dur == 0:
+            return 0.0
+        return len(self.trades) / dur
+
+    @property
+    def ask_trade_frequency(self):
+        """
+        Buy-aggressor trades per second (trades that hit the ask side).
+
+        These are trades with side='b' where the buyer is the aggressor.
+        """
+        dur = self._duration_seconds()
+        if dur == 0:
+            return 0.0
+        return sum(1 for t in self.trades if t.side == "b") / dur
+
+    @property
+    def bid_trade_frequency(self):
+        """
+        Sell-aggressor trades per second (trades that hit the bid side).
+
+        These are trades with side='s' where the seller is the aggressor.
+        """
+        dur = self._duration_seconds()
+        if dur == 0:
+            return 0.0
+        return sum(1 for t in self.trades if t.side == "s") / dur
+
+    @property
+    def trade_volume_imbalance(self):
+        """
+        Normalized trade volume imbalance: (buy_vol − sell_vol) / (buy_vol + sell_vol).
+
+        Ranges from −1 (all sell-aggressor volume) to +1 (all buy-aggressor volume).
+        Returns 0.0 if there are no trades.
+        """
+        buy_vol = sum(t.volume for t in self.trades if t.side == "b")
+        sell_vol = sum(t.volume for t in self.trades if t.side == "s")
+        total = buy_vol + sell_vol
+        if total == 0:
+            return 0.0
+        return (buy_vol - sell_vol) / total
+
+    def kyle_lambda(self, interval=None, window_size=None):
+        """
+        Estimate Kyle's lambda: price impact per unit of signed order flow.
+
+        Fits ΔP_mid = λ · Q_signed + α via OLS, where Q_signed is net signed
+        volume (buy volume − sell volume) and ΔP_mid is the midprice change over
+        the same interval. Zero-flow intervals are excluded from the regression.
+
+        Args:
+            interval:    None → one observation per consecutive LOB-update pair
+                             (t₁, t₂): Q_signed = trades in (t₁, t₂],
+                             ΔP_mid = mid(t₂) − mid(t₁).
+                         N   → non-overlapping fixed-width buckets [t, t+N):
+                             Q_signed = trades in the bucket,
+                             ΔP_mid = mid(t+N) − mid(t).
+                             N is in the same units as timestamps.
+            window_size: None → scalar λ over all observations (float).
+                         W   → rolling λ at each observation end timestamp;
+                             returns pd.Series indexed by end timestamps.
+                             W is in the same units as timestamps.
+
+        Returns:
+            float when window_size is None.
+            pd.Series indexed by observation end timestamps when window_size is given.
+            nan / empty Series if fewer than 2 non-zero-flow observations exist.
+        """
+        lob_ts_list = self._lobts.timestamps
+        if len(lob_ts_list) < 2:
+            return float("nan") if window_size is None else pd.Series(dtype=float)
+
+        lob_ts = np.array(lob_ts_list, dtype=np.int64)
+        mid_prices = self._lobts.midprice_ts().to_numpy(dtype=np.float64)
+
+        trades_sorted = sorted(self.trades, key=lambda t: t.timestamp)
+        if not trades_sorted:
+            return float("nan") if window_size is None else pd.Series(dtype=float)
+
+        trade_ts = np.array([t.timestamp for t in trades_sorted], dtype=np.int64)
+        trade_sv = np.array(
+            [t.volume if t.side == "b" else -t.volume for t in trades_sorted],
+            dtype=np.float64,
+        )
+
+        def _mid_at(ts):
+            idx = np.searchsorted(lob_ts, ts, side="right") - 1
+            return float("nan") if idx < 0 else float(mid_prices[idx])
+
+        def _sum_sv(lo, hi, lo_incl):
+            # (lo, hi] when lo_incl=False;  [lo, hi) when lo_incl=True
+            side_lo = "left" if lo_incl else "right"
+            side_hi = "left" if lo_incl else "right"
+            a = np.searchsorted(trade_ts, lo, side=side_lo)
+            b = np.searchsorted(trade_ts, hi, side=side_hi)
+            return float(np.sum(trade_sv[a:b])) if a < b else 0.0
+
+        def _ols_slope(qs, dps):
+            if len(qs) < 2:
+                return float("nan")
+            x_mat = np.column_stack([qs, np.ones(len(qs))])
+            try:
+                coefs, _, _, _ = np.linalg.lstsq(x_mat, dps, rcond=None)
+                return float(coefs[0])
+            except Exception:
+                return float("nan")
+
+        obs_q: list = []
+        obs_dp: list = []
+        obs_ts: list = []
+
+        if interval is None:
+            for i in range(len(lob_ts) - 1):
+                t1, t2 = int(lob_ts[i]), int(lob_ts[i + 1])
+                m1, m2 = float(mid_prices[i]), float(mid_prices[i + 1])
+                if np.isnan(m1) or np.isnan(m2):
+                    continue
+                q = _sum_sv(t1, t2, lo_incl=False)
+                if q == 0.0:
+                    continue
+                obs_q.append(q)
+                obs_dp.append(m2 - m1)
+                obs_ts.append(t2)
+        else:
+            iv = int(interval)
+            t = int(lob_ts[0])
+            t_end = int(lob_ts[-1])
+            while t < t_end:
+                t_next = t + iv
+                m1, m2 = _mid_at(t), _mid_at(t_next)
+                if not (np.isnan(m1) or np.isnan(m2)):
+                    q = _sum_sv(t, t_next, lo_incl=True)
+                    if q != 0.0:
+                        obs_q.append(q)
+                        obs_dp.append(m2 - m1)
+                        obs_ts.append(t_next)
+                t = t_next
+
+        obs_q_arr = np.asarray(obs_q, dtype=np.float64)
+        obs_dp_arr = np.asarray(obs_dp, dtype=np.float64)
+        obs_ts_arr = np.asarray(obs_ts, dtype=np.int64)
+
+        if window_size is None:
+            return _ols_slope(obs_q_arr, obs_dp_arr)
+
+        if len(obs_q_arr) == 0:
+            return pd.Series(dtype=float)
+
+        n = len(obs_q_arr)
+        lambdas = np.full(n, float("nan"))
+        left = 0
+        for right in range(n):
+            while obs_ts_arr[left] < obs_ts_arr[right] - window_size:
+                left += 1
+            lambdas[right] = _ols_slope(obs_q_arr[left : right + 1], obs_dp_arr[left : right + 1])
+
+        return pd.Series(lambdas, index=obs_ts_arr)
+
+    def fill_rate(self, holding_time, side="a", buckets=None):
+        """
+        Fill probability for a passive limit order at each tick distance δ.
+
+        Uses the empirical Gueant trade arrival rate λ̂(δ) = N(δ) / T(δ) and
+        applies the Poisson fill-probability formula:
+
+            P(fill within holding_time | δ) = 1 − exp(−λ̂(δ) · holding_time)
+
+        λ̂(δ) is the rate of trades arriving at distance δ from the best quote,
+        estimated directly from the LOB and trade history (no model fitting).
+        holding_time is in the same units as all timestamps in this TL.
+
+        Args:
+            holding_time: order resting duration before cancellation (timestamp units).
+            side:         'a' (ask side — filled by buy-aggressor trades) or
+                          'b' (bid side — filled by sell-aggressor trades).
+            buckets:      optional list of δ thresholds to aggregate integer-δ bins;
+                          same semantics as tl.gueant.buckets().
+
+        Returns:
+            pd.DataFrame with columns:
+                delta     – tick distance from best quote (int or float threshold)
+                N         – number of trades observed at this δ
+                T         – total book-time (timestamp units) the book exposed liquidity at δ
+                lambda    – empirical arrival rate N/T; nan if no exposure or no trades
+                fill_rate – P(fill within holding_time); nan where lambda is nan
+        """
+        df = self.gueant.buckets(side, buckets).copy()
+        ht = float(holding_time)
+        df["fill_rate"] = df["lambda"].apply(
+            lambda lam: float("nan") if np.isnan(lam) else 1.0 - np.exp(-lam * ht)
+        )
+        return df
+
+    def hawkes(self, side=None, window_size=None):
+        """
+        Fit a univariate exponential Hawkes process to trade timestamps.
+
+        λ(t) = μ + Σᵢ α · exp(−β · (t − tᵢ))
+
+        Parameters are always in SI units — μ and α in events/second, β in 1/second —
+        regardless of the TL's timestamp_unit.
+
+        Args:
+            side:        None = all trades, 'b' = buy-aggressors only,
+                         's' = sell-aggressors only.
+            window_size: None  → scalar fit over all trades; returns dict.
+                         N     → rolling fit at each trade timestamp; returns
+                                 pd.DataFrame. N is in the same timestamp units
+                                 as all other TL methods.
+
+        Returns:
+            dict with keys 'mu', 'alpha', 'beta', 'branching_ratio' (all floats)
+            when window_size is None.
+
+            pd.DataFrame with those four columns, indexed by trade timestamps
+            (in original timestamp units), when window_size is given.
+
+            Returns nan / empty DataFrame if fewer than 3 trades are available.
+
+        Notes:
+            branching_ratio = α / β.  Values ≥ 1 indicate a non-stationary process
+            (the optimizer enforces < 1; fits near 1 suggest the model is a poor fit
+            or the data is too short).
+            half_life = ln(2) / β  (in seconds).
+        """
+        from .hawkes import _fit
+
+        nan = float("nan")
+        trades_list = sorted(
+            (t for t in self.trades if side is None or t.side == side),
+            key=lambda t: t.timestamp,
+        )
+
+        scale = _TS_UNITS[self.timestamp_unit]  # ticks per second
+
+        def _result(mu, alpha, beta):
+            br = alpha / beta if (np.isfinite(alpha) and np.isfinite(beta) and beta > 0.0) else nan
+            return {"mu": mu, "alpha": alpha, "beta": beta, "branching_ratio": br}
+
+        if window_size is None:
+            if len(trades_list) < 3:
+                return _result(nan, nan, nan)
+            ts_s = np.array([t.timestamp for t in trades_list], dtype=np.float64) / scale
+            ts_s -= ts_s[0]
+            mu, alpha, beta = _fit(ts_s)
+            return _result(mu, alpha, beta)
+
+        # Rolling fit at each trade timestamp
+        if not trades_list:
+            return pd.DataFrame(columns=["mu", "alpha", "beta", "branching_ratio"])
+
+        ts_s = np.array([t.timestamp for t in trades_list], dtype=np.float64) / scale
+        ts_orig = np.array([t.timestamp for t in trades_list], dtype=np.int64)
+        ws_s = window_size / scale
+
+        n = len(ts_s)
+        mus = np.full(n, nan)
+        alphas = np.full(n, nan)
+        betas = np.full(n, nan)
+        brs = np.full(n, nan)
+
+        left = 0
+        for right in range(n):
+            while ts_s[left] < ts_s[right] - ws_s:
+                left += 1
+            window = ts_s[left : right + 1] - ts_s[left]
+            mu, alpha, beta = _fit(window)
+            mus[right] = mu
+            alphas[right] = alpha
+            betas[right] = beta
+            if np.isfinite(alpha) and np.isfinite(beta) and beta > 0.0:
+                brs[right] = alpha / beta
+
+        return pd.DataFrame(
+            {"mu": mus, "alpha": alphas, "beta": betas, "branching_ratio": brs},
+            index=ts_orig,
+        )
+
     @property
     def gueant(self):
         """Accessor for Guéant intensity function parameters (λ(δ) = A·exp(-k·δ))."""
@@ -397,23 +704,51 @@ class TL:
     def _from_parquet_eager(self, path):
         df = pd.read_parquet(path).sort_values("timestamp")
 
+        has_exch_ts = "exchange_timestamp" in df.columns
+        has_seq = "sequence" in df.columns
+
         _lob_side = {"bid": "b", "ask": "a"}
         _trade_side = {"buy": "b", "sell": "s"}
 
+        tl_exch_ts = []
+        tl_seqs = []
+        lob_exch_ts = []
+        lob_seqs = []
+
         for ts, group in df.groupby("timestamp", sort=True):
+            exch_val = int(group.iloc[0]["exchange_timestamp"]) if has_exch_ts else None
+            seq_val = int(group.iloc[0]["sequence"]) if has_seq else None
+
+            has_lob = False
+
             levels = group[group["event_type"] == "book_level"]
             if not levels.empty:
+                has_lob = True
                 bids = [(r.price, r.quantity) for r in levels[levels["side"] == "bid"].itertuples()]
                 asks = [(r.price, r.quantity) for r in levels[levels["side"] == "ask"].itertuples()]
                 self.add_lob_snapshot(ts, bids, asks)
 
             updates = group[group["event_type"] == "book_update"]
             if not updates.empty:
+                has_lob = True
                 upd = [(_lob_side[r.side], r.price, r.quantity) for r in updates.itertuples()]
                 self.add_lob_update(ts, upd)
 
             for r in group[group["event_type"] == "trade"].itertuples():
                 self.add_trade(ts, _trade_side[r.side], r.price, r.quantity)
+
+            if has_exch_ts or has_seq:
+                tl_exch_ts.append(exch_val if has_exch_ts else 0)
+                tl_seqs.append(seq_val if has_seq else 0)
+                if has_lob:
+                    lob_exch_ts.append(exch_val if has_exch_ts else 0)
+                    lob_seqs.append(seq_val if has_seq else 0)
+
+        if has_exch_ts or has_seq:
+            self._exchange_timestamps = np.array(tl_exch_ts, dtype=np.int64)
+            self._sequences = np.array(tl_seqs, dtype=np.int64)
+            self._lobts._exchange_timestamps = np.array(lob_exch_ts, dtype=np.int64)
+            self._lobts._sequences = np.array(lob_seqs, dtype=np.int64)
 
     def _from_parquet_lazy(self, path):
         import pyarrow.compute as pc
@@ -423,21 +758,73 @@ class TL:
         from .lobts import _LAZY_DELTA_DTYPE, LOBts
 
         _lobts_mode = "latest" if self.lob_mode == "snapshot" else "lazy"
-        lazy_lobts = LOBts(name=self.name, tick_size=self.tick_size, mode=_lobts_mode)
-
-        table = pq.read_table(
-            path,
-            columns=["timestamp", "event_type", "side", "price", "quantity"],
+        lazy_lobts = LOBts(
+            name=self.name,
+            tick_size=self.tick_size,
+            mode=_lobts_mode,
+            timestamp_unit=self.timestamp_unit,
         )
+
+        schema = pq.read_schema(path)
+        base_cols = ["timestamp", "event_type", "side", "price", "quantity"]
+        has_exch_ts = "exchange_timestamp" in schema.names
+        has_seq = "sequence" in schema.names
+        read_cols = list(base_cols)
+        if has_exch_ts:
+            read_cols.append("exchange_timestamp")
+        if has_seq:
+            read_cols.append("sequence")
+
+        table = pq.read_table(path, columns=read_cols)
 
         # Sort by timestamp once upfront
         table = table.sort_by("timestamp")
+
+        # Build per-unique-timestamp exchange_timestamp / sequence arrays
+        all_ts = table.column("timestamp").to_numpy().astype(np.int64)
+        if has_exch_ts or has_seq:
+            exch_ts_col = (
+                table.column("exchange_timestamp").to_numpy().astype(np.int64)
+                if has_exch_ts
+                else np.zeros(len(table), dtype=np.int64)
+            )
+            seq_col = (
+                table.column("sequence").to_numpy().astype(np.int64)
+                if has_seq
+                else np.zeros(len(table), dtype=np.int64)
+            )
+            unique_ts_vals, first_idx = np.unique(all_ts, return_index=True)
+            tl_exch_ts = exch_ts_col[first_idx]
+            tl_seqs = seq_col[first_idx]
+        else:
+            tl_exch_ts = np.empty(0, dtype=np.int64)
+            tl_seqs = np.empty(0, dtype=np.int64)
 
         # Vectorised split by event type — no Python-level row iteration
         et_col = table.column("event_type")
         bl_table = table.filter(pc.equal(et_col, "book_level"))
         bu_table = table.filter(pc.equal(et_col, "book_update"))
         tr_table = table.filter(pc.equal(et_col, "trade"))
+
+        # Build per-LOB-timestamp exchange_timestamp / sequence for LOBts
+        if has_exch_ts or has_seq:
+            lob_mask = np.isin(
+                all_ts,
+                np.concatenate(
+                    [
+                        bl_table.column("timestamp").to_numpy(),
+                        bu_table.column("timestamp").to_numpy(),
+                    ]
+                ),
+            )
+            lob_unique_ts, lob_first_idx = np.unique(all_ts[lob_mask], return_index=True)
+            lob_exch_ts = (
+                exch_ts_col[lob_mask][lob_first_idx] if has_exch_ts else np.empty(0, dtype=np.int64)
+            )
+            lob_seqs = seq_col[lob_mask][lob_first_idx] if has_seq else np.empty(0, dtype=np.int64)
+        else:
+            lob_exch_ts = np.empty(0, dtype=np.int64)
+            lob_seqs = np.empty(0, dtype=np.int64)
 
         # --- book_update → delta log (fully vectorised, no per-row boxing) ---
         if len(bu_table) > 0:
@@ -499,7 +886,12 @@ class TL:
         if len(delta_log) > 0:
             lazy_lobts.build_checkpoints()
 
+        lazy_lobts._exchange_timestamps = lob_exch_ts
+        lazy_lobts._sequences = lob_seqs
+
         self._lobts = lazy_lobts
+        self._exchange_timestamps = tl_exch_ts
+        self._sequences = tl_seqs
 
     def __repr__(self):
         return (
