@@ -1,8 +1,0 @@
-- lob snapshots : 52687
-- trades        : 39433
-- ohlc (5s)         : 6143 candles  [0.05s]
-- bid/ask ts        : 52687 points  [2.35s]
-- spread ts         : mean=-0.0178  [1.20s]
-- realized vol (30s): 39433 points  [1.05s]
-- vpin (30s)        : 39433 points  [5.36s]
-- gueant (30s)      : 92120 points  [4.72s]
