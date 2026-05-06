@@ -1,0 +1,3 @@
+[submodule "c/carquet"]
+	path = c/carquet
+	url = https://github.com/Vitruves/carquet.git
