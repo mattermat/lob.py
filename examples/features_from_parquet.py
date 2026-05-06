@@ -61,9 +61,7 @@ class Stopwatch:
         print("Timing summary", flush=True)
         print("=" * 60, flush=True)
         total = sum(v[0] for v in self._records.values())
-        for label, (elapsed, extra) in sorted(
-            self._records.items(), key=lambda x: -x[1][0]
-        ):
+        for label, (elapsed, extra) in sorted(self._records.items(), key=lambda x: -x[1][0]):
             pct = elapsed / total * 100 if total > 0 else 0
             bar = "█" * int(pct / 2)
             extra_str = f"  [{extra}]" if extra else ""
@@ -78,29 +76,31 @@ sw = Stopwatch()
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 def parse_args():
-    p = argparse.ArgumentParser(
-        description="Extract trading features from raw LOB+trades parquet"
-    )
+    p = argparse.ArgumentParser(description="Extract trading features from raw LOB+trades parquet")
     p.add_argument("input", type=str, help="Path to input parquet file")
     p.add_argument("--output", "-o", type=str, default=None, help="Output file path")
     p.add_argument(
-        "--format", "-f",
+        "--format",
+        "-f",
         choices=["parquet", "csv"],
         default="parquet",
         help="Output format [default: parquet]",
     )
     p.add_argument(
-        "--hawkes", action="store_true",
+        "--hawkes",
+        action="store_true",
         help="Enable rolling Hawkes fits (very slow)",
     )
     p.add_argument(
-        "--short-window", "-s",
+        "--short-window",
+        "-s",
         type=float,
         default=5.0,
         help="Short rolling window in seconds [default: 5]",
     )
     p.add_argument(
-        "--long-window", "-l",
+        "--long-window",
+        "-l",
         type=float,
         default=60.0,
         help="Long rolling window in seconds [default: 60]",
@@ -128,8 +128,8 @@ def main():
         print(f"Error: file not found: {input_path}", file=sys.stderr)
         sys.exit(1)
 
-    output_path = Path(args.output) if args.output else input_path.with_stem(
-        input_path.stem + "_features"
+    output_path = (
+        Path(args.output) if args.output else input_path.with_stem(input_path.stem + "_features")
     )
     if args.format == "csv":
         output_path = output_path.with_suffix(".csv")
@@ -137,9 +137,9 @@ def main():
         output_path = output_path.with_suffix(".parquet")
 
     short_ns = int(args.short_window * _SEC_TO_NS)
-    long_ns  = int(args.long_window * _SEC_TO_NS)
+    long_ns = int(args.long_window * _SEC_TO_NS)
     short_label = f"{args.short_window:.0f}s".replace(".0s", "s")
-    long_label  = f"{args.long_window:.0f}s".replace(".0s", "s")
+    long_label = f"{args.long_window:.0f}s".replace(".0s", "s")
 
     print(f"Input:         {input_path}", flush=True)
     print(f"Output:        {output_path}", flush=True)
@@ -165,14 +165,14 @@ def main():
     print("\n--- LOB snapshot features ---", flush=True)
     lob_series = {}
     for attr, label in [
-        ("spread",      "lob.spread"),
-        ("bid",         "lob.bid"),
-        ("ask",         "lob.ask"),
-        ("midprice",    "lob.midprice"),
-        ("bidq",        "lob.bidq"),
-        ("askq",        "lob.askq"),
+        ("spread", "lob.spread"),
+        ("bid", "lob.bid"),
+        ("ask", "lob.ask"),
+        ("midprice", "lob.midprice"),
+        ("bidq", "lob.bidq"),
+        ("askq", "lob.askq"),
         ("vw_midprice", "lob.vw_midprice"),
-        ("vi",          "lob.vi"),
+        ("vi", "lob.vi"),
     ]:
         sw.tick(label)
         lob_series[attr] = getattr(tl.lob, attr)
@@ -192,19 +192,21 @@ def main():
 
     if args.hawkes:
         sw.tick("rolling: hawkes")
-        hawkes_roll = tl.hawkes(window_size=long_ns).rename(
-            columns=lambda c: f"hawkes_{c}"
-        )
+        hawkes_roll = tl.hawkes(window_size=long_ns).rename(columns=lambda c: f"hawkes_{c}")
         sw.tock()
     else:
         hawkes_roll = pd.DataFrame()
 
     sw.tick("rolling: gueant ask")
-    A_ask_long, k_ask_long = tl.gueant.ask(window_size=long_ns, buckets=custom_buckets) # noqa: N806
+    A_ask_long, k_ask_long = tl.gueant.ask(  # noqa: N806
+        window_size=long_ns, buckets=custom_buckets
+    )
     sw.tock()
 
     sw.tick("rolling: gueant bid")
-    A_bid_long, k_bid_long = tl.gueant.bid(window_size=long_ns, buckets=custom_buckets) # noqa: N806
+    A_bid_long, k_bid_long = tl.gueant.bid(  # noqa: N806
+        window_size=long_ns, buckets=custom_buckets
+    )
     sw.tock()
 
     sw.tick("rolling: realized_vol")
@@ -268,23 +270,20 @@ def main():
     sw.tick(f"rolling {short_label}: per-window loop")
     records, ts_out = [], []
     for tl_w in tqdm(
-        tl.rolling(short_ns),
-        desc=f"rolling {short_label}",
-        unit="window",
-        mininterval=0.5
+        tl.rolling(short_ns), desc=f"rolling {short_label}", unit="window", mininterval=0.5
     ):
         ts_out.append(tl_w.timestamps[-1])
         records.append(
             {
-                f"order_arrival_rate{short_suffix}":     tl_w.lob.order_arrival_frequency,
-                f"order_cancel_rate{short_suffix}":      tl_w.lob.order_cancel_frequency,
+                f"order_arrival_rate{short_suffix}": tl_w.lob.order_arrival_frequency,
+                f"order_cancel_rate{short_suffix}": tl_w.lob.order_cancel_frequency,
                 f"bid_order_arrival_rate{short_suffix}": tl_w.lob.bid_order_arrival_frequency,
                 f"ask_order_arrival_rate{short_suffix}": tl_w.lob.ask_order_arrival_frequency,
-                f"bid_order_cancel_rate{short_suffix}":  tl_w.lob.bid_order_cancel_frequency,
-                f"ask_order_cancel_rate{short_suffix}":  tl_w.lob.ask_order_cancel_frequency,
-                f"trade_freq{short_suffix}":             tl_w.trade_frequency,
-                f"ask_trade_freq{short_suffix}":         tl_w.ask_trade_frequency,
-                f"bid_trade_freq{short_suffix}":         tl_w.bid_trade_frequency,
+                f"bid_order_cancel_rate{short_suffix}": tl_w.lob.bid_order_cancel_frequency,
+                f"ask_order_cancel_rate{short_suffix}": tl_w.lob.ask_order_cancel_frequency,
+                f"trade_freq{short_suffix}": tl_w.trade_frequency,
+                f"ask_trade_freq{short_suffix}": tl_w.ask_trade_frequency,
+                f"bid_trade_freq{short_suffix}": tl_w.bid_trade_frequency,
             }
         )
     sw.tock(f"{len(records)} windows")
@@ -296,11 +295,15 @@ def main():
 
     # gueant at short window
     sw.tick(f"rolling: gueant ask {short_label}")
-    A_ask_short, k_ask_short = tl.gueant.ask(window_size=short_ns, buckets=custom_buckets) # noqa: N806
+    A_ask_short, k_ask_short = tl.gueant.ask(  # noqa: N806
+        window_size=short_ns, buckets=custom_buckets
+    )
     sw.tock()
 
     sw.tick(f"rolling: gueant bid {short_label}")
-    A_bid_short, k_bid_short = tl.gueant.bid(window_size=short_ns, buckets=custom_buckets) # noqa: N806
+    A_bid_short, k_bid_short = tl.gueant.bid(  # noqa: N806
+        window_size=short_ns, buckets=custom_buckets
+    )
     sw.tock()
 
     sw.tick(f"features: gueant {short_label} join")

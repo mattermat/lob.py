@@ -21,7 +21,7 @@ def _read(path: str) -> pd.DataFrame:
 
 
 def compare(c_path: str, py_path: str) -> int:
-    c  = _read(c_path)
+    c = _read(c_path)
     py = _read(py_path)
 
     common = sorted(set(c.columns) & set(py.columns))
@@ -43,11 +43,12 @@ def compare(c_path: str, py_path: str) -> int:
         d = (a[ok] - b[ok]).abs()
         exact = (d < TOL).sum()
         close = ((d >= TOL) & (d < 1e-6)).sum()
-        big   = (d >= 1e-6).sum()
+        big = (d >= 1e-6).sum()
         nan_mm = (a.isna() != b.isna()).sum()
         diffs.append((col, f"{d.max():.2e}", exact, close, big, nan_mm))
 
-    print(f"{'column':<22s} {'max_diff':>10s} {'exact':>6s} {'~close':>6s} {'big':>6s} {'NaN≠':>5s}")
+    hdr = f"{'column':<22s} {'max_diff':>10s} {'exact':>6s} {'~close':>6s} {'big':>6s}"
+    print(hdr + f" {'NaN≠':>5s}")
     print("-" * 60)
     for col, mx, ex, cl, bg, nm in diffs:
         print(f"{col:<22s} {mx:>10s} {ex:>6d} {cl:>6d} {bg:>6d} {nm:>5d}")

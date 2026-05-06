@@ -1205,9 +1205,11 @@ class LOBts:
             import math
 
             vw_midprices = [
-                (b * bq + a * aq) / (bq + aq)
-                if not math.isnan(b) and not math.isnan(a) and (bq + aq) != 0
-                else float("nan")
+                (
+                    (b * bq + a * aq) / (bq + aq)
+                    if not math.isnan(b) and not math.isnan(a) and (bq + aq) != 0
+                    else float("nan")
+                )
                 for b, a, bq, aq in zip(bids, asks, bidqs, askqs)
             ]
             return pd.Series(vw_midprices, index=ts_list, name="vw_midprice")
@@ -1261,8 +1263,7 @@ class LOBts:
             ts_list, _, _, bidqs, askqs = self._seq_extract_best(start_ts, end_ts)
 
             vi_values = [
-                (bq - aq) / (bq + aq) if (bq + aq) != 0 else 0.0
-                for bq, aq in zip(bidqs, askqs)
+                (bq - aq) / (bq + aq) if (bq + aq) != 0 else 0.0 for bq, aq in zip(bidqs, askqs)
             ]
             return pd.Series(vi_values, index=ts_list, name="vi")
 
