@@ -18,7 +18,10 @@ setup(
     long_description_content_type="text/markdown",
     url="https://github.com/mattermat/lob.py",
     packages=find_packages(),
+    setup_requires=["cffi>=1.0.0"],
+    cffi_modules=["lobpy/_cext/build.py:ffibuilder"],
     install_requires=[
+        "cffi>=1.0.0",
         "numpy>=1.20.0",
         "pandas>=1.3.0",
     ],
