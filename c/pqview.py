@@ -238,6 +238,7 @@ class PqView:
     def _run(self) -> None:
         curses.curs_set(0)
         self.scr.timeout(30)  # ~33 fps
+        curses.mousemask(curses.ALL_MOUSE_EVENTS | curses.REPORT_MOUSE_POSITION)
 
         while True:
             self._render()
@@ -264,6 +265,11 @@ class PqView:
 
         if key == ord("q"):
             return False
+
+        # Mouse
+        if key == curses.KEY_MOUSE:
+            self._handle_mouse()
+            return True
 
         # Movement
         elif key in (ord("h"), curses.KEY_LEFT):
@@ -320,6 +326,22 @@ class PqView:
             self.show_help = not self.show_help
 
         return True
+
+    # ── mouse ────────────────────────────────────────────────────────────
+
+    def _handle_mouse(self) -> None:
+        try:
+            _id, x, y, _z, bstate = curses.getmouse()
+        except curses.error:
+            return
+
+        scroll_lines = 3
+        mr = max(self.data.num_rows - 1, 0)
+
+        if bstate & curses.BUTTON4_PRESSED:  # scroll up
+            self.row = max(0, self.row - scroll_lines)
+        elif bstate & curses.BUTTON5_PRESSED:  # scroll down
+            self.row = min(mr, self.row + scroll_lines)
 
     # ── search ───────────────────────────────────────────────────────────
 
